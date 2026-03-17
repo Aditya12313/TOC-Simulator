@@ -10,11 +10,8 @@ function CFGMini() {
     return () => clearInterval(t);
   }, []);
 
-  // Three derivation phases to animate through
   const states = [
-    // phase 0: just root S
     { nodes: [{ id: 'S', cx: 60, cy: 18, isNT: true }], edges: [] },
-    // phase 1: S → aSb
     {
       nodes: [
         { id: 'S', cx: 60, cy: 18, isNT: true },
@@ -28,7 +25,6 @@ function CFGMini() {
         { x1: 60, y1: 26, x2: 100, y2: 48 },
       ],
     },
-    // phase 2: inner S → ε
     {
       nodes: [
         { id: 'S', cx: 60, cy: 18, isNT: true },
@@ -45,37 +41,31 @@ function CFGMini() {
       ],
     },
   ];
-
-  const current = states[phase];
+  const cur = states[phase];
 
   return (
     <svg viewBox="0 0 120 110" width="100" height="92" overflow="visible">
       <AnimatePresence>
-        {current.edges.map((e, i) => (
-          <motion.line key={`e-${phase}-${i}`}
-            x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2}
-            stroke="#86efac" strokeWidth="1.8"
-            initial={{ pathLength: 0, opacity: 0 }}
-            animate={{ pathLength: 1, opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.4, ease: 'easeOut' }}
+        {cur.edges.map((e, i) => (
+          <motion.line key={`e-${phase}-${i}`} x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2}
+            stroke="var(--cfg-border)" strokeWidth="1.8"
+            initial={{ pathLength: 0, opacity: 0 }} animate={{ pathLength: 1, opacity: 1 }}
+            exit={{ opacity: 0 }} transition={{ duration: 0.4, ease: 'easeOut' }}
           />
         ))}
       </AnimatePresence>
       <AnimatePresence>
-        {current.nodes.map((n, i) => (
+        {cur.nodes.map((n, i) => (
           <motion.g key={`n-${phase}-${i}`}
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
+            initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0, opacity: 0 }}
             transition={{ delay: i * 0.08, type: 'spring', stiffness: 350, damping: 20 }}>
             <circle cx={n.cx} cy={n.cy} r="11"
-              fill={n.isNT ? '#16a34a' : '#f0fdf4'}
-              stroke={n.isNT ? '#15803d' : '#86efac'}
-              strokeWidth="1.5"/>
+              fill={n.isNT ? 'var(--cfg)' : 'var(--cfg-bg)'}
+              stroke="var(--cfg-border)" strokeWidth="1.5"/>
             <text x={n.cx} y={n.cy + 4} textAnchor="middle"
               fontSize="8.5" fontFamily="JetBrains Mono" fontWeight="700"
-              fill={n.isNT ? '#fff' : '#15803d'}>{n.id}</text>
+              fill={n.isNT ? 'var(--surface)' : 'var(--cfg)'}>{n.id}</text>
           </motion.g>
         ))}
       </AnimatePresence>
@@ -87,7 +77,7 @@ function CFGMini() {
 function PDAMini() {
   const [stack, setStack] = useState<string[]>(['Z', 'A', 'A']);
   useEffect(() => {
-    const frames = [['Z'], ['Z', 'A'], ['Z', 'A', 'A'], ['Z', 'A', 'A', 'A'], ['Z', 'A', 'A'], ['Z', 'A'], ['Z']];
+    const frames = [['Z'], ['Z','A'], ['Z','A','A'], ['Z','A','A','A'], ['Z','A','A'], ['Z','A'], ['Z']];
     let i = 0;
     const t = setInterval(() => { i = (i + 1) % frames.length; setStack(frames[i]); }, 600);
     return () => clearInterval(t);
@@ -104,10 +94,10 @@ function PDAMini() {
               transition={{ type: 'spring', stiffness: 400, damping: 28 }}
               style={{
                 width: 44, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: i === stack.length - 1 ? '#ea580c' : '#fff7ed',
-                border: `1.5px solid ${i === stack.length - 1 ? '#c2410c' : '#fdba74'}`,
+                background: i === stack.length - 1 ? 'var(--pda)' : 'var(--pda-bg)',
+                border: `1.5px solid var(--pda-border)`,
                 fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 11,
-                color: i === stack.length - 1 ? '#fff' : '#9a3412', overflow: 'hidden',
+                color: i === stack.length - 1 ? 'var(--surface)' : 'var(--pda)', overflow: 'hidden',
               }}>
               {sym}
             </motion.div>
@@ -131,7 +121,7 @@ function TMMini() {
       <motion.div
         animate={{ x: (head - 2) * 28 }}
         transition={{ type: 'spring', stiffness: 350, damping: 28 }}
-        style={{ fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 11, color: '#e11d48' }}>
+        style={{ fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 11, color: 'var(--tm)' }}>
         ▼
       </motion.div>
       <div style={{ display: 'flex' }}>
@@ -139,10 +129,10 @@ function TMMini() {
           <div key={i} style={{
             width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 12,
-            border: `1.5px solid ${i === head ? '#e11d48' : '#d6cfc3'}`,
-            borderRight: i < tape.length - 1 ? 'none' : `1.5px solid ${i === head ? '#e11d48' : '#d6cfc3'}`,
-            background: i === head ? '#e11d48' : '#faf8f4',
-            color: i === head ? '#fff' : '#1c1917',
+            border: `1.5px solid ${i === head ? 'var(--tm)' : 'var(--border)'}`,
+            borderRight: i < tape.length - 1 ? 'none' : `1.5px solid ${i === head ? 'var(--tm)' : 'var(--border)'}`,
+            background: i === head ? 'var(--tm)' : 'var(--surface)',
+            color: i === head ? 'var(--bg)' : 'var(--ink)',
             transition: 'background 0.2s, border-color 0.2s, color 0.2s',
           }}>
             {sym}
@@ -153,29 +143,29 @@ function TMMini() {
   );
 }
 
-/* ── Single Module Card with 3D Tilt ─────────────────────── */
+/* ── Module type ─────────────────────────────────────────── */
+type ModuleId = 'cfg' | 'pda' | 'tm';
+
 interface CardProps {
+  id: ModuleId;
   label: string;
   title: string;
   subtitle: string;
   description: string;
   features: string[];
   path: string;
-  accent: string;
-  accentLight: string;
-  accentBorder: string;
-  tagClass: string;
   delay: number;
   mini: React.ReactNode;
 }
 
-function ModuleCard({ label, title, subtitle, description, features, path, accent, accentLight, accentBorder, tagClass, delay, mini }: CardProps) {
+/* ── Single Module Card ───────────────────────────────────── */
+function ModuleCard({ id, label, title, subtitle, description, features, path, delay, mini }: CardProps) {
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
   const rawX = useMotionValue(0);
   const rawY = useMotionValue(0);
-  const rotX = useSpring(useTransform(rawY, [-80, 80], [8, -8]), { stiffness: 200, damping: 22 });
-  const rotY = useSpring(useTransform(rawX, [-100, 100], [-10, 10]), { stiffness: 200, damping: 22 });
+  const rotX = useSpring(useTransform(rawY, [-80,  80], [ 8, -8]), { stiffness: 200, damping: 22 });
+  const rotY = useSpring(useTransform(rawX, [-100,100], [-10,10]), { stiffness: 200, damping: 22 });
 
   const onMove = (e: React.MouseEvent) => {
     const r = ref.current!.getBoundingClientRect();
@@ -184,58 +174,61 @@ function ModuleCard({ label, title, subtitle, description, features, path, accen
   };
   const onLeave = () => { rawX.set(0); rawY.set(0); };
 
+  // All colors come from CSS variables — dark mode just overrides them
+  const accentVar    = `var(--${id})`;
+  const accentBgVar  = `var(--${id}-bg)`;
+  const accentBdVar  = `var(--${id}-border)`;
+
   return (
     <motion.div
-      ref={ref}
-      onMouseMove={onMove}
-      onMouseLeave={onLeave}
+      ref={ref} onMouseMove={onMove} onMouseLeave={onLeave}
       onClick={() => navigate(path)}
-      initial={{ opacity: 0, y: 40 }}
+      initial={{ opacity: 0, y: 44 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay, type: 'spring', stiffness: 160, damping: 18 }}
       whileHover={{ y: -6 }}
       style={{ rotateX: rotX, rotateY: rotY, transformStyle: 'preserve-3d', perspective: 700, cursor: 'pointer' }}
       className="flex-1 min-w-0"
     >
-      <div
-        className="h-full rounded-xl border-2 overflow-hidden flex flex-col"
+      <div className="h-full rounded-xl border-2 overflow-hidden flex flex-col"
         style={{
           background: 'var(--surface)',
-          borderColor: accentBorder,
-          boxShadow: `4px 4px 0 ${accentBorder}`,
-          transition: 'box-shadow 0.15s',
-        }}
-      >
-        {/* Header with mini animation */}
+          borderColor: accentBdVar,
+          boxShadow: `4px 4px 0 ${accentBdVar}`,
+        }}>
+
+        {/* Card header strip */}
         <div className="px-5 pt-5 pb-4 flex items-start justify-between"
-          style={{ background: accentLight, borderBottom: `1.5px solid ${accentBorder}` }}>
+          style={{ background: accentBgVar, borderBottom: `1.5px solid ${accentBdVar}` }}>
           <div className="flex-1 pr-2">
-            <span className={`pill ${tagClass} text-[11px] mb-2 inline-flex`}>{label}</span>
-            <h3 className="font-black text-lg text-[var(--ink)] leading-tight mt-1">{title}</h3>
-            <p className="font-mono text-xs mt-1" style={{ color: accent }}>{subtitle}</p>
+            {/* Label pill — uses CSS-var colors directly */}
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold font-mono border mb-2"
+              style={{ background: accentBgVar, color: accentVar, borderColor: accentBdVar }}>
+              {label}
+            </span>
+            <h3 className="font-black text-lg leading-tight mt-1" style={{ color: 'var(--ink)' }}>{title}</h3>
+            <p className="font-mono text-xs mt-1" style={{ color: accentVar }}>{subtitle}</p>
           </div>
-          {/* Mini animation area - fixed size */}
+          {/* Mini animation */}
           <div style={{ width: 100, height: 92, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             {mini}
           </div>
         </div>
 
-        {/* Body */}
+        {/* Card body */}
         <div className="px-5 py-4 flex flex-col flex-1">
-          <p className="text-sm text-[var(--ink-3)] leading-relaxed mb-4">{description}</p>
+          <p className="text-sm leading-relaxed mb-4" style={{ color: 'var(--ink-3)' }}>{description}</p>
           <ul className="space-y-2 flex-1">
             {features.map(f => (
-              <li key={f} className="flex items-start gap-2 text-xs text-[var(--ink-2)]">
-                <span className="mt-0.5 font-bold" style={{ color: accent }}>›</span>
+              <li key={f} className="flex items-start gap-2 text-xs" style={{ color: 'var(--ink-2)' }}>
+                <span className="mt-0.5 font-bold" style={{ color: accentVar }}>›</span>
                 <span>{f}</span>
               </li>
             ))}
           </ul>
-          <motion.button
-            whileHover={{ x: 5 }}
-            transition={{ type: 'spring', stiffness: 400 }}
+          <motion.button whileHover={{ x: 5 }} transition={{ type: 'spring', stiffness: 400 }}
             className="mt-4 text-xs font-bold font-mono flex items-center gap-1 self-start"
-            style={{ color: accent }}>
+            style={{ color: accentVar }}>
             Open simulator →
           </motion.button>
         </div>
@@ -248,99 +241,83 @@ function ModuleCard({ label, title, subtitle, description, features, path, accen
 export default function LandingPage() {
   const CARDS: Omit<CardProps, 'delay'>[] = [
     {
-      path: '/cfg',
-      label: 'CFG',
-      title: 'Context Free Grammar',
-      subtitle: 'S → aSb | ε',
-      accent: '#16a34a',
-      accentLight: '#f0fdf4',
-      accentBorder: '#86efac',
-      tagClass: 'pill-cfg',
+      id: 'cfg', path: '/cfg', label: 'CFG',
+      title: 'Context Free Grammar', subtitle: 'S → aSb | ε',
       description: 'Define production rules and derive strings step-by-step. Detect ambiguity, test membership with CYK, and simplify grammars to CNF.',
       features: ['Leftmost & rightmost derivation', 'Parse tree visualization', 'Grammar simplification / CNF', 'CYK membership test', 'Pumping lemma simulation'],
       mini: <CFGMini />,
     },
     {
-      path: '/pda',
-      label: 'PDA',
-      title: 'Pushdown Automata',
-      subtitle: 'δ(q, a, Z) = (q′, AZ)',
-      accent: '#ea580c',
-      accentLight: '#fff7ed',
-      accentBorder: '#fdba74',
-      tagClass: 'pill-pda',
+      id: 'pda', path: '/pda', label: 'PDA',
+      title: 'Pushdown Automata', subtitle: 'δ(q, a, Z) = (q′, AZ)',
       description: 'Model nondeterministic stack machines. Watch every push and pop operation frame-by-frame with full trace of all computation paths.',
       features: ['BFS nondeterminism', 'Animated stack visualization', 'Configuration trace table', 'CFG → PDA conversion', 'Final state & empty stack accept'],
       mini: <PDAMini />,
     },
     {
-      path: '/tm',
-      label: 'TM',
-      title: 'Turing Machine',
-      subtitle: 'δ(q, σ) = (q′, σ′, L/R)',
-      accent: '#e11d48',
-      accentLight: '#fff1f2',
-      accentBorder: '#fda4af',
-      tagClass: 'pill-tm',
+      id: 'tm', path: '/tm', label: 'TM',
+      title: 'Turing Machine', subtitle: 'δ(q, σ) = (q′, σ′, L/R)',
       description: 'Simulate an infinite tape Turing Machine. Animate head movement, detect potential infinite loops, and explore 4 built-in machines.',
       features: ['Animated tape head movement', 'Sliding tape window view', 'Loop / halt detection', '4 built-in examples', 'Accept / Reject / Loop states'],
       mini: <TMMini />,
     },
   ];
 
+  // Formal notation decoration (right side of hero)
+  const notations = [
+    { text: 'S → aSb | ε',               id: 'cfg' as ModuleId },
+    { text: 'δ(q₀, a, Z) = (q₁, AZ)',    id: 'pda' as ModuleId },
+    { text: 'δ(q, σ) = (q′, σ′, R)',      id: 'tm'  as ModuleId },
+  ];
+
   return (
     <div className="flex flex-col dot-grid" style={{ height: 'calc(100vh - 48px)', overflow: 'hidden' }}>
 
       {/* Hero row */}
-      <motion.div
-        className="flex items-center justify-between px-10 pt-10 pb-6 shrink-0"
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45, ease: 'easeOut' }}
-      >
+      <motion.div className="flex items-center justify-between px-10 pt-10 pb-6 shrink-0"
+        initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: 'easeOut' }}>
+
         <div className="max-w-md">
-          <div className="pill pill-gray mb-3">Computational Playground</div>
-          <h1 className="text-5xl font-black leading-tight text-[var(--ink)]">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border font-mono mb-3"
+            style={{ background: 'var(--bg-2)', color: 'var(--ink-3)', borderColor: 'var(--border)' }}>
+            Computational Playground
+          </span>
+          <h1 className="text-5xl font-black leading-tight" style={{ color: 'var(--ink)' }}>
             Theory of
             <span className="relative mx-2 inline-block">
               Computation
               <svg className="absolute -bottom-1 left-0 w-full" height="5" viewBox="0 0 260 5" preserveAspectRatio="none">
-                <path d="M2 3.5 Q65 1 130 3 Q195 5 258 2" stroke="#16a34a" strokeWidth="2.5" fill="none" strokeLinecap="round"/>
+                <path d="M2 3.5 Q65 1 130 3 Q195 5 258 2" stroke="var(--cfg)" strokeWidth="2.5" fill="none" strokeLinecap="round"/>
               </svg>
             </span>
             Lab
           </h1>
-          <p className="text-sm text-[var(--ink-3)] mt-4 leading-relaxed max-w-sm">
+          <p className="text-sm mt-4 leading-relaxed max-w-sm" style={{ color: 'var(--ink-3)' }}>
             An interactive simulator for CFG, PDA, and Turing Machines.
             Step through every computation — see exactly how each machine thinks.
           </p>
         </div>
 
-        {/* Right side decorative formula */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.3, duration: 0.4 }}
-          className="hidden lg:flex flex-col gap-2 items-end"
-        >
-          {[
-            { text: 'S → aSb | ε', color: '#16a34a', bg: '#f0fdf4', border: '#86efac' },
-            { text: 'δ(q₀, a, Z) = (q₁, AZ)', color: '#ea580c', bg: '#fff7ed', border: '#fdba74' },
-            { text: 'δ(q, σ) = (q′, σ′, R)', color: '#e11d48', bg: '#fff1f2', border: '#fda4af' },
-          ].map((rule, i) => (
-            <motion.div key={i}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.35 + i * 0.1 }}
+        {/* Notation pills (right side) */}
+        <div className="hidden lg:flex flex-col gap-2 items-end">
+          {notations.map((n, i) => (
+            <motion.div key={n.id}
+              initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.3 + i * 0.1 }}
               className="px-4 py-2 rounded-lg border font-mono text-sm font-semibold"
-              style={{ background: rule.bg, borderColor: rule.border, color: rule.color }}>
-              {rule.text}
+              style={{
+                background: `var(--${n.id}-bg)`,
+                borderColor: `var(--${n.id}-border)`,
+                color: `var(--${n.id})`,
+              }}>
+              {n.text}
             </motion.div>
           ))}
-        </motion.div>
+        </div>
       </motion.div>
 
-      {/* Three cards — equal width, uniform gap */}
+      {/* Three cards — equal width */}
       <div className="flex-1 px-10 pb-8 overflow-hidden">
         <div className="flex gap-5 h-full">
           {CARDS.map((card, i) => (
@@ -350,12 +327,9 @@ export default function LandingPage() {
       </div>
 
       {/* Bottom hint */}
-      <motion.p
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.7 }}
-        className="text-center text-[10px] font-mono text-[var(--ink-3)] pb-3 shrink-0"
-      >
+      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.7 }}
+        className="text-center text-[10px] font-mono pb-3 shrink-0"
+        style={{ color: 'var(--ink-3)' }}>
         click any card to open simulator · all engines run locally in your browser
       </motion.p>
     </div>
