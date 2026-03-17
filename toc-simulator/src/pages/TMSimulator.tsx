@@ -1,68 +1,65 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, Pause, SkipForward, SkipBack, RotateCcw, Cpu, BookOpen, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RotateCcw, BookOpen, Cpu, AlertTriangle, ChevronRight } from 'lucide-react';
 import {
-  parseTMDefinition,
-  simulateTM,
-  TM_EXAMPLES,
-  type TMStep,
-  type TMDefinition,
+  parseTMDefinition, simulateTM, TM_EXAMPLES,
+  type TMStep, type TMDefinition,
 } from '../engine/tm/TMEngine';
+import PlaybackBar from '../components/PlaybackBar';
 
-const TAPE_WINDOW = 15; // number of cells visible
+const TAPE_WIN = 17; // visible cells each side of head
 
-function TapeViz({ step, blankSymbol }: { step: TMStep; blankSymbol: string }) {
-  const { tapeSnapshot, headPosition, tapeMin } = step;
-  const cells = tapeSnapshot.split('');
-  const windowStart = Math.max(0, headPosition - Math.floor(TAPE_WINDOW / 2));
-  const windowEnd = windowStart + TAPE_WINDOW;
+function TapeDisplay({ step, blank }: { step: TMStep; blank: string }) {
+  // build visible window around head
+  const chars = step.tapeSnapshot.split('');
+  const headAbs = step.tapeMin + step.headPosition; // absolute tape coord
+  const winStart = headAbs - Math.floor(TAPE_WIN / 2);
 
-  const displayCells: { symbol: string; index: number; isHead: boolean }[] = [];
-  for (let i = windowStart - 2; i < windowEnd + 2; i++) {
-    displayCells.push({
-      symbol: i >= 0 && i < cells.length ? cells[i] : blankSymbol,
-      index: tapeMin + i,
-      isHead: i === headPosition,
+  const cells: { sym: string; abs: number }[] = [];
+  for (let i = winStart; i < winStart + TAPE_WIN + 2; i++) {
+    const relToSnap = i - step.tapeMin;
+    cells.push({
+      sym: relToSnap >= 0 && relToSnap < chars.length ? chars[relToSnap] : blank,
+      abs: i,
     });
   }
 
   return (
-    <div className="overflow-hidden">
-      <div className="flex items-end gap-1 justify-center py-4">
-        {displayCells.map((cell, i) => (
+    <div className="flex flex-col items-center gap-2">
+      {/* Head indicator */}
+      <div className="flex" style={{ gap: 0 }}>
+        {cells.map(c => (
+          <div key={c.abs}
+            className={`flex items-center justify-center text-xs font-mono font-bold transition-colors duration-150 ${
+              c.abs === headAbs ? '' : 'opacity-0'
+            }`}
+            style={{ width: 40, color: 'var(--tm)' }}>
+            ▼
+          </div>
+        ))}
+      </div>
+      {/* Tape */}
+      <div className="flex border border-[var(--border)] rounded-lg overflow-hidden"
+        style={{ borderRadius: 8 }}>
+        {cells.map((c) => (
           <motion.div
-            key={`${cell.index}-${i}`}
+            key={c.abs}
             layout
-            className="flex flex-col items-center gap-1"
+            animate={c.abs === headAbs ? { scale: [1, 1.08, 1] } : {}}
+            transition={{ duration: 0.25 }}
+            className={`tape-cell ${c.abs === headAbs ? 'active' : ''}`}
           >
-            {cell.isHead && (
-              <motion.div
-                layoutId="head-arrow"
-                className="flex flex-col items-center"
-                initial={{ y: -10, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-              >
-                <div className="text-primary-400 text-xs font-bold">HEAD</div>
-                <ChevronRight size={16} className="text-primary-400 rotate-90" />
-              </motion.div>
-            )}
-            <motion.div
-              animate={cell.isHead ? {
-                scale: [1, 1.1, 1],
-                transition: { duration: 0.3 }
-              } : {}}
-              className={`w-9 h-9 flex items-center justify-center border rounded font-mono text-sm font-bold transition-all duration-200 ${
-                cell.isHead
-                  ? 'border-primary-500 bg-primary-500/30 text-primary-200 ring-2 ring-primary-500/50'
-                  : cell.symbol !== blankSymbol
-                  ? 'border-white/20 bg-white/5 text-white/80'
-                  : 'border-white/5 bg-transparent text-white/20'
-              }`}
-            >
-              {cell.symbol}
-            </motion.div>
-            <div className="text-white/20 text-xs font-mono">{cell.index}</div>
+            {c.sym}
           </motion.div>
+        ))}
+      </div>
+      {/* Cell indices */}
+      <div className="flex" style={{ gap: 0 }}>
+        {cells.map((c) => (
+          <div key={c.abs} style={{ width: 40 }}
+            className="flex items-center justify-center text-[9px] font-mono text-[var(--ink-3)]">
+            {c.abs}
+          </div>
         ))}
       </div>
     </div>
@@ -71,284 +68,242 @@ function TapeViz({ step, blankSymbol }: { step: TMStep; blankSymbol: string }) {
 
 export default function TMSimulator() {
   const [definition, setDefinition] = useState(TM_EXAMPLES[0].definition);
-  const [inputString, setInputString] = useState(TM_EXAMPLES[0].input);
-  const [steps, setSteps] = useState<TMStep[]>([]);
-  const [currentStep, setCurrentStep] = useState(0);
-  const [tm, setTm] = useState<TMDefinition | null>(null);
-  const [errors, setErrors] = useState<string[]>([]);
-  const [result, setResult] = useState<{ accepted: boolean; rejected: boolean; message: string; loopDetected: boolean } | null>(null);
-  const [isRunning, setIsRunning] = useState(false);
-  const [simulated, setSimulated] = useState(false);
-  const [speed, setSpeed] = useState(600); // ms between auto steps
+  const [inputStr,   setInputStr]   = useState(TM_EXAMPLES[0].input);
+  const [tm,         setTm]         = useState<TMDefinition | null>(null);
+  const [steps,      setSteps]      = useState<TMStep[]>([]);
+  const [curStep,    setCurStep]    = useState(0);
+  const [speed,      setSpeed]      = useState(2);
+  const [isRunning,  setIsRunning]  = useState(false);
+  const [errors,     setErrors]     = useState<string[]>([]);
+  const [result,     setResult]     = useState<{ ok: boolean; rejected: boolean; msg: string; loop: boolean } | null>(null);
+  const [simulated,  setSimulated]  = useState(false);
+  const [shaking,    setShaking]    = useState(false);
 
-  const autoRunRef = useRef<number | null>(null);
+  const autoRef = useRef<number | null>(null);
+  const traceRef = useRef<HTMLDivElement>(null);
+  const speedMs  = [1400, 700, 200][speed - 1];
 
-  const loadExample = (ex: typeof TM_EXAMPLES[0]) => {
-    setDefinition(ex.definition);
-    setInputString(ex.input);
-    reset();
-  };
-
-  const reset = useCallback(() => {
-    setSteps([]);
-    setCurrentStep(0);
-    setIsRunning(false);
-    setResult(null);
-    setSimulated(false);
-    setTm(null);
-    setErrors([]);
-    if (autoRunRef.current) clearInterval(autoRunRef.current);
+  const stopAuto = () => { if (autoRef.current) clearInterval(autoRef.current); setIsRunning(false); };
+  const resetAll = useCallback(() => {
+    stopAuto(); setSteps([]); setCurStep(0); setResult(null); setSimulated(false);
+    setTm(null); setErrors([]); setShaking(false);
   }, []);
 
-  const simulate = useCallback(() => {
-    reset();
-    const { tm: parsedTm, errors: parseErrors } = parseTMDefinition(definition);
-    if (parseErrors.length > 0) { setErrors(parseErrors); return; }
-    setErrors([]);
-    setTm(parsedTm!);
-    const trace = simulateTM(parsedTm!, inputString);
+  const runSim = useCallback(() => {
+    resetAll();
+    const { tm: parsed, errors: pe } = parseTMDefinition(definition);
+    if (pe.length) { setErrors(pe); return; }
+    setTm(parsed!);
+    const trace = simulateTM(parsed!, inputStr);
     setSteps(trace.steps);
-    setResult({ accepted: trace.accepted, rejected: trace.rejected, message: trace.message, loopDetected: trace.loopDetected });
-    setSimulated(true);
-    setCurrentStep(0);
-  }, [definition, inputString, reset]);
+    setResult({ ok: trace.accepted, rejected: trace.rejected, msg: trace.message, loop: trace.loopDetected });
+    setSimulated(true); setCurStep(0);
+  }, [definition, inputStr, resetAll]);
 
-  const toggleAutoRun = useCallback(() => {
-    if (isRunning) {
-      setIsRunning(false);
-      clearInterval(autoRunRef.current!);
-    } else {
-      setIsRunning(true);
-      autoRunRef.current = window.setInterval(() => {
-        setCurrentStep(prev => {
-          if (prev >= steps.length - 1) {
-            setIsRunning(false);
-            clearInterval(autoRunRef.current!);
-            return prev;
-          }
-          return prev + 1;
-        });
-      }, speed);
+  const togglePlay = useCallback(() => {
+    if (isRunning) { stopAuto(); return; }
+    setIsRunning(true);
+    autoRef.current = window.setInterval(() => {
+      setCurStep(p => {
+        if (p >= steps.length - 1) { stopAuto(); return p; }
+        return p + 1;
+      });
+    }, speedMs);
+  }, [isRunning, steps.length, speedMs]);
+
+  useEffect(() => () => stopAuto(), []);
+
+  // Trigger shake on rejection
+  useEffect(() => {
+    if (result && !result.ok && curStep === steps.length - 1) {
+      setShaking(true);
+      setTimeout(() => setShaking(false), 600);
     }
-  }, [isRunning, steps.length, speed]);
+  }, [curStep, result]);
 
-  useEffect(() => () => { if (autoRunRef.current) clearInterval(autoRunRef.current); }, []);
+  // Scroll trace
+  useEffect(() => {
+    if (traceRef.current && curStep >= 0) {
+      const el = traceRef.current.querySelector(`[data-step="${curStep}"]`);
+      el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [curStep]);
 
-  const curStep = steps[currentStep];
-  const isAtEnd = currentStep === steps.length - 1;
+  const cur = steps[curStep];
+  const isAtEnd = curStep === steps.length - 1;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-accent-500 to-pink-600 flex items-center justify-center">
-          <Cpu size={20} className="text-white" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-black text-white">Turing Machine Simulator</h1>
-          <p className="text-white/40 text-sm">Infinite Tape · Head Movement · Halting Conditions · Loop Detection</p>
-        </div>
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 48px)' }}>
+      {/* Header tabs */}
+      <div className="border-b border-[var(--border)] px-4 py-2 flex items-center gap-3"
+        style={{ background: 'var(--surface)' }}>
+        <span className="pill pill-tm shrink-0">TM</span>
+        <span className="text-xs text-[var(--ink-3)] font-mono">Turing Machine Simulator</span>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Input Panel */}
-        <div className="xl:col-span-1 space-y-4">
-          <div className="section-card">
-            <div className="flex items-center gap-2 mb-3">
-              <BookOpen size={14} className="text-accent-400" />
-              <span className="text-xs font-bold text-white/60 uppercase tracking-wider">Built-in Examples</span>
-            </div>
-            <div className="space-y-1.5">
+      <div className="flex flex-1 overflow-hidden">
+
+        {/* LEFT: Input */}
+        <div className="w-64 border-r border-[var(--border)] flex flex-col overflow-y-auto shrink-0"
+          style={{ background: 'var(--bg-2)' }}>
+          {/* Examples */}
+          <div className="p-3 border-b border-[var(--border)]">
+            <div className="section-label flex items-center gap-1"><BookOpen size={10}/> Built-in Examples</div>
+            <div className="space-y-1">
               {TM_EXAMPLES.map(ex => (
-                <button key={ex.name} onClick={() => loadExample(ex)}
-                  className="w-full text-left px-3 py-2 rounded-lg glass-hover text-xs">
-                  <div className="font-semibold text-white/80">{ex.name}</div>
-                  <div className="text-white/40 mt-0.5">{ex.description}</div>
+                <button key={ex.name} onClick={() => { setDefinition(ex.definition); setInputStr(ex.input); resetAll(); }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[var(--surface)] border border-transparent hover:border-[var(--border)] transition-all text-xs">
+                  <div className="font-semibold text-[var(--ink)]">{ex.name}</div>
+                  <div className="text-[var(--ink-3)] mt-0.5 font-mono text-[10px]">{ex.description}</div>
                 </button>
               ))}
             </div>
           </div>
-
-          <div className="section-card space-y-3">
-            <p className="text-xs font-bold text-white/60 uppercase tracking-wider">TM Definition</p>
+          <div className="p-3 space-y-3 flex-1">
             <div>
-              <label className="label">Transition Function</label>
-              <textarea className="input-field h-56 resize-none font-mono text-xs" value={definition} onChange={e => setDefinition(e.target.value)} />
-              <p className="text-white/25 text-xs mt-1">Format: δ(state,symbol) = (newState,write,L|R|S)</p>
+              <div className="section-label">Transition Function</div>
+              <textarea className="code-input h-56 resize-none" value={definition} onChange={e => setDefinition(e.target.value)}/>
+              <p className="text-[10px] text-[var(--ink-3)] mt-1 font-mono">δ(state,sym) = (newState,write,L|R|S)</p>
             </div>
             <div>
-              <label className="label">Input String</label>
-              <input className="input-field" value={inputString} onChange={e => setInputString(e.target.value)} placeholder="aabb" />
-            </div>
-            <div>
-              <label className="label">Auto-run Speed</label>
-              <div className="flex gap-2">
-                {[{ label: 'Slow', ms: 1200 }, { label: 'Normal', ms: 600 }, { label: 'Fast', ms: 200 }].map(s => (
-                  <button key={s.label} onClick={() => setSpeed(s.ms)}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${speed === s.ms ? 'bg-accent-500/20 text-accent-400 border border-accent-500/30' : 'glass text-white/50'}`}>
-                    {s.label}
-                  </button>
-                ))}
-              </div>
+              <div className="section-label">Input String</div>
+              <input className="code-input-field" value={inputStr} onChange={e => setInputStr(e.target.value)} placeholder="aabb"/>
             </div>
             {errors.length > 0 && (
-              <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-3">
-                {errors.map((e, i) => <p key={i} className="text-red-400 text-xs">{e}</p>)}
+              <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2 font-mono space-y-0.5">
+                {errors.map((e,i) => <p key={i}>{e}</p>)}
               </div>
             )}
-            <button onClick={simulate} className="btn-primary w-full justify-center" style={{ background: 'linear-gradient(135deg, #d946ef, #ec4899)' }}>
-              <Play size={14} /> Run Turing Machine
+            <button onClick={runSim} className="btn-tm w-full justify-center">
+              ▶ Run Machine
             </button>
+            {simulated && <button onClick={resetAll} className="btn-outline w-full justify-center"><RotateCcw size={12}/> Reset</button>}
           </div>
         </div>
 
-        {/* Visualization */}
-        <div className="xl:col-span-2 space-y-4">
-          {simulated && curStep ? (
-            <>
-              {/* Tape Visualization */}
-              <div className="section-card overflow-hidden">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="label">Tape</p>
-                  <span className="badge-blue">Position: {curStep.tapeMin + curStep.headPosition}</span>
-                </div>
-                <TapeViz step={curStep} blankSymbol={tm?.blankSymbol ?? '_'} />
-              </div>
-
-              {/* State Dashboard */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="section-card text-center">
-                  <p className="label mb-1">State</p>
-                  <motion.p key={curStep.state} initial={{ scale: 0.8 }} animate={{ scale: 1 }}
-                    className={`text-2xl font-black font-mono ${
-                      curStep.accepted ? 'text-emerald-400' :
-                      curStep.rejected ? 'text-red-400' : 'text-accent-300'
-                    }`}>
-                    {curStep.state}
-                  </motion.p>
-                </div>
-                <div className="section-card text-center">
-                  <p className="label mb-1">Reading</p>
-                  <p className="text-2xl font-mono font-bold text-white">
-                    {curStep.tapeSnapshot[curStep.headPosition] ?? tm?.blankSymbol ?? '_'}
-                  </p>
-                </div>
-                <div className="section-card text-center">
-                  <p className="label mb-1">Status</p>
-                  <p className={`text-sm font-bold ${curStep.accepted ? 'text-emerald-400' : curStep.rejected ? 'text-red-400' : 'text-accent-400'}`}>
-                    {curStep.accepted ? 'ACCEPTED' : curStep.rejected ? 'REJECTED' : 'RUNNING'}
-                  </p>
-                </div>
-              </div>
-
-              {/* Applied Transition */}
-              {curStep.appliedTransition && (
-                <div className="section-card">
-                  <p className="label mb-2">Applied Transition</p>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <div className="font-mono text-sm bg-accent-500/10 border border-accent-500/20 rounded-lg px-3 py-2 text-accent-300">
-                      δ({curStep.appliedTransition.fromState}, {curStep.appliedTransition.readSymbol})
-                    </div>
-                    <ChevronRight size={16} className="text-white/30" />
-                    <div className="font-mono text-sm bg-accent-500/10 border border-accent-500/20 rounded-lg px-3 py-2 text-accent-300">
-                      ({curStep.appliedTransition.toState}, {curStep.appliedTransition.writeSymbol}, {curStep.appliedTransition.moveDirection})
-                    </div>
+        {/* CENTER: Tape + state */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 overflow-auto p-5 dot-grid">
+            {simulated && cur ? (
+              <div className="space-y-4">
+                {/* Tape */}
+                <div className={`card p-5 overflow-x-auto ${shaking ? 'animate-shake' : ''}`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="section-label">Tape</p>
+                    <span className="pill pill-tm">head @ {cur.tapeMin + cur.headPosition}</span>
                   </div>
-                  <p className="text-xs text-white/50 mt-2">{curStep.explanation}</p>
+                  <TapeDisplay step={cur} blank={tm?.blankSymbol ?? '_'} />
                 </div>
-              )}
 
-              {/* Controls */}
-              <div className="section-card">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <button onClick={() => setCurrentStep(0)} className="btn-secondary" disabled={currentStep === 0}>
-                    <SkipBack size={14} />
-                  </button>
-                  <button onClick={() => setCurrentStep(p => Math.max(0, p - 1))} className="btn-secondary" disabled={currentStep === 0}>
-                    <ChevronLeft size={14} /> Prev
-                  </button>
-                  <button onClick={toggleAutoRun} disabled={isAtEnd && !isRunning}
-                    className={isRunning ? 'btn-accent' : 'btn-primary'} style={!isRunning ? { background: 'linear-gradient(135deg, #d946ef, #ec4899)' } : {}}>
-                    {isRunning ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Auto Run</>}
-                  </button>
-                  <button onClick={() => setCurrentStep(p => Math.min(steps.length - 1, p + 1))} className="btn-secondary" disabled={currentStep >= steps.length - 1}>
-                    Next <ChevronRight size={14} />
-                  </button>
-                  <button onClick={() => setCurrentStep(steps.length - 1)} className="btn-secondary">
-                    <SkipForward size={14} />
-                  </button>
-                  <button onClick={reset} className="btn-secondary ml-auto">
-                    <RotateCcw size={14} /> Reset
-                  </button>
-                </div>
-                <div className="mt-2 h-1 bg-white/5 rounded-full overflow-hidden">
-                  <motion.div className="h-full" style={{ background: 'linear-gradient(90deg, #d946ef, #ec4899)' }}
-                    animate={{ width: `${((currentStep + 1) / steps.length) * 100}%` }} />
-                </div>
-                <p className="text-xs text-white/30 mt-1">Step {currentStep + 1} / {steps.length}</p>
-              </div>
-
-              {/* Result + Loop Warning */}
-              <AnimatePresence>
-                {result && isAtEnd && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className={`section-card border ${
-                      result.loopDetected ? 'border-yellow-500/30 bg-yellow-500/5' :
-                      result.accepted ? 'border-emerald-500/30 bg-emerald-500/5' :
-                      'border-red-500/30 bg-red-500/5'
-                    }`}>
-                    {result.loopDetected && <AlertTriangle size={16} className="text-yellow-400 mb-1" />}
-                    <p className={`font-bold text-sm ${result.loopDetected ? 'text-yellow-400' : result.accepted ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {result.message}
+                {/* State / symbol / status */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="card p-4 text-center">
+                    <p className="section-label mb-1">State</p>
+                    <motion.p key={cur.state} initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                      className="text-2xl font-black font-mono"
+                      style={{ color: cur.accepted ? 'var(--cfg)' : cur.rejected ? 'var(--tm)' : 'var(--ink)' }}>
+                      {cur.state}
+                    </motion.p>
+                  </div>
+                  <div className="card p-4 text-center">
+                    <p className="section-label mb-1">Reading</p>
+                    <p className="text-2xl font-black font-mono text-[var(--ink)]">
+                      {cur.tapeSnapshot[cur.headPosition] ?? tm?.blankSymbol ?? '_'}
                     </p>
+                  </div>
+                  <div className="card p-4 text-center">
+                    <p className="section-label mb-1">Status</p>
+                    <p className={`text-sm font-bold ${cur.accepted ? 'text-[var(--cfg)]' : cur.rejected ? 'text-[var(--tm)]' : 'text-[var(--ink-3)]'}`}>
+                      {cur.accepted ? '✓ ACCEPTED' : cur.rejected ? '✗ REJECTED' : '● RUNNING'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Transition applied */}
+                {cur.appliedTransition && (
+                  <motion.div key={curStep} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
+                    className="card p-4 border-l-4" style={{ borderLeftColor: 'var(--tm)' }}>
+                    <p className="section-label mb-1">Applied Transition</p>
+                    <div className="flex items-center gap-2 flex-wrap font-mono text-sm font-bold text-[var(--ink)]">
+                      <span>δ({cur.appliedTransition.fromState}, {cur.appliedTransition.readSymbol})</span>
+                      <ChevronRight size={14} className="text-[var(--ink-3)]"/>
+                      <span>({cur.appliedTransition.toState}, {cur.appliedTransition.writeSymbol}, {cur.appliedTransition.moveDirection})</span>
+                    </div>
+                    <p className="text-xs text-[var(--ink-3)] font-mono mt-1.5 leading-relaxed">{cur.explanation}</p>
                   </motion.div>
                 )}
-              </AnimatePresence>
 
-              {/* Trace Table */}
-              <div className="section-card overflow-x-auto">
-                <p className="label mb-3">Execution Trace</p>
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-white/10">
-                      {['Step', 'State', 'Tape', 'Head', 'Transition', 'Result'].map(h => (
-                        <th key={h} className="text-left py-2 px-2 text-white/40 font-semibold">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {steps.map((s, i) => (
-                      <tr key={i} onClick={() => setCurrentStep(i)}
-                        className={`border-b border-white/5 cursor-pointer transition-colors ${i === currentStep ? 'bg-accent-500/10' : 'hover:bg-white/3'}`}>
-                        <td className="py-1.5 px-2 text-white/40">{s.stepNum}</td>
-                        <td className="py-1.5 px-2 font-mono text-accent-300 font-bold">{s.state}</td>
-                        <td className="py-1.5 px-2 font-mono text-white/60 max-w-24 truncate">{s.tapeSnapshot || '_'}</td>
-                        <td className="py-1.5 px-2 text-white/50">{s.tapeMin + s.headPosition}</td>
-                        <td className="py-1.5 px-2 font-mono text-white/50">
-                          {s.appliedTransition
-                            ? `(${s.appliedTransition.toState},${s.appliedTransition.writeSymbol},${s.appliedTransition.moveDirection})`
-                            : '—'}
-                        </td>
-                        <td className="py-1.5 px-2">
-                          {s.accepted ? <span className="badge-green">Accept</span> :
-                           s.rejected ? <span className="badge-red">Reject</span> :
-                           <span className="text-white/20">—</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                {/* Result */}
+                {result && isAtEnd && (
+                  <AnimatePresence>
+                    <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
+                      className={`animate-pop-in ${result.loop ? 'result-warn' : result.ok ? 'result-accept' : 'result-reject'}`}>
+                      {result.loop && <AlertTriangle size={14} className="inline mr-1"/>}
+                      {result.msg}
+                    </motion.div>
+                  </AnimatePresence>
+                )}
               </div>
-            </>
-          ) : (
-            <div className="section-card flex flex-col items-center justify-center py-20 text-center">
-              <Cpu size={56} className="text-white/8 mb-4" />
-              <p className="text-white/30 text-sm">Select an example or define your TM, then click Run.</p>
-              <p className="text-white/20 text-xs mt-2">All 4 built-in examples include acceptance by final state logic.</p>
-            </div>
-          )}
+            ) : (
+              <div className="flex flex-col items-center justify-center h-48 text-center text-[var(--ink-3)]">
+                <Cpu size={40} className="mb-3 opacity-20"/>
+                <p className="text-sm">Select an example or define your TM, then click <strong>Run Machine</strong>.</p>
+                <p className="text-xs mt-1 font-mono opacity-60">loop detection active · up to 1000 steps</p>
+              </div>
+            )}
+          </div>
+
+          <PlaybackBar
+            currentStep={simulated ? curStep : -1}
+            totalSteps={steps.length}
+            isRunning={isRunning}
+            speed={speed}
+            onFirst={() => setCurStep(0)}
+            onPrev={() => setCurStep(p => Math.max(0, p - 1))}
+            onNext={() => setCurStep(p => Math.min(steps.length - 1, p + 1))}
+            onLast={() => setCurStep(steps.length - 1)}
+            onTogglePlay={togglePlay}
+            onSpeedChange={s => { setSpeed(s); stopAuto(); }}
+            accentClass="btn-tm" accentColor="var(--tm)"
+          />
         </div>
+
+        {/* RIGHT: Trace Table */}
+        {simulated && steps.length > 0 && (
+          <div className="w-72 border-l border-[var(--border)] flex flex-col shrink-0 overflow-hidden"
+            style={{ background: 'var(--surface)' }}>
+            <div className="p-3 border-b border-[var(--border)]">
+              <p className="section-label">Execution Trace</p>
+            </div>
+            <div className="flex-1 overflow-y-auto" ref={traceRef}>
+              <table className="w-full text-xs">
+                <thead className="sticky top-0" style={{ background: 'var(--bg-2)' }}>
+                  <tr className="border-b border-[var(--border)]">
+                    {['#','State','Tape','Head','Result'].map(h => (
+                      <th key={h} className="text-left py-1.5 px-2 font-mono text-[10px] text-[var(--ink-3)]">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {steps.map((s, i) => (
+                    <tr key={i} data-step={i} onClick={() => setCurStep(i)}
+                      className="border-b border-[var(--border)] cursor-pointer transition-colors"
+                      style={curStep === i ? { background: 'var(--tm-bg)' } : {}}>
+                      <td className="py-1.5 px-2 font-mono text-[var(--ink-3)]">{s.stepNum}</td>
+                      <td className="py-1.5 px-1.5 font-mono font-bold" style={{ color: 'var(--tm)' }}>{s.state}</td>
+                      <td className="py-1.5 px-1.5 font-mono text-[var(--ink-2)] max-w-16 truncate text-[10px]">{s.tapeSnapshot||'_'}</td>
+                      <td className="py-1.5 px-1.5 font-mono text-[var(--ink-3)] text-[10px]">{s.tapeMin + s.headPosition}</td>
+                      <td className="py-1.5 px-1.5">
+                        {s.accepted ? <span className="pill pill-cfg">✓</span> :
+                         s.rejected ? <span className="pill pill-tm">✗</span> : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,593 +1,500 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, SkipForward, SkipBack, RotateCcw, Pause, ChevronRight, BookOpen, Info, TreePine, Diff, Wrench, Beaker } from 'lucide-react';
+import { RotateCcw, BookOpen, ChevronRight, TreePine, Diff, Wrench, FlaskConical, Gauge } from 'lucide-react';
 import {
-  parseGrammar,
-  deriveLeftmost,
-  deriveRightmost,
-  cykMembership,
-  detectAmbiguity,
-  simplifyGrammar,
-  simulatePumpingLemma,
-  buildParseTree,
-  type ParseTreeNode,
-  type DerivationStep,
+  parseGrammar, deriveLeftmost, deriveRightmost, cykMembership,
+  detectAmbiguity, simplifyGrammar, simulatePumpingLemma, buildParseTree,
+  type ParseTreeNode, type DerivationStep,
 } from '../engine/cfg/CFGEngine';
+import PlaybackBar from '../components/PlaybackBar';
 
-const EXAMPLE_GRAMMARS = [
-  {
-    name: 'Matching Parentheses',
-    rules: 'S -> SS | (S) | ε',
-    start: 'S',
-    input: '(())',
-    description: 'Classic grammar for balanced parentheses',
-  },
-  {
-    name: 'aⁿbⁿ Language',
-    rules: 'S -> aSb | ε',
-    start: 'S',
-    input: 'aabb',
-    description: 'Grammar generating equal numbers of a and b',
-  },
-  {
-    name: 'Arithmetic Expressions',
-    rules: 'E -> E+T | T\nT -> T*F | F\nF -> (E) | a',
-    start: 'E',
-    input: 'a+a*a',
-    description: 'Grammar for arithmetic (+, *) with precedence',
-  },
-  {
-    name: 'Ambiguous Grammar',
-    rules: 'S -> S+S | S*S | a',
-    start: 'S',
-    input: 'a+a*a',
-    description: 'Ambiguous expression grammar (no precedence)',
-  },
+const EXAMPLES = [
+  { name: 'aⁿbⁿ',        rules: 'S -> aSb | ε', start: 'S', input: 'aabb',    desc: 'Equal a\'s and b\'s' },
+  { name: 'Matching ()',   rules: 'S -> SS | (S) | ε', start: 'S', input: '(())', desc: 'Balanced parens' },
+  { name: 'Arithmetic',   rules: 'E -> E+T | T\nT -> T*F | F\nF -> (E) | a', start: 'E', input: 'a+a*a', desc: 'Expr grammar' },
+  { name: 'Ambiguous',    rules: 'S -> S+S | S*S | a', start: 'S', input: 'a+a*a', desc: 'No precedence' },
 ];
 
-type SimMode = 'derivation' | 'parse-tree' | 'ambiguity' | 'simplify' | 'pumping' | 'membership';
+type Mode = 'derivation' | 'parse-tree' | 'ambiguity' | 'simplify' | 'membership' | 'pumping';
 
-function ParseTreeViz({ node, depth = 0 }: { node: ParseTreeNode; depth?: number }) {
-  const colors = ['text-primary-400', 'text-accent-400', 'text-emerald-400', 'text-yellow-400', 'text-orange-400'];
-  const color = colors[depth % colors.length];
+const MODES: { id: Mode; label: string; icon: React.ReactNode }[] = [
+  { id: 'derivation',  label: 'Derivation',   icon: <ChevronRight size={12}/> },
+  { id: 'parse-tree',  label: 'Parse Tree',   icon: <TreePine size={12}/> },
+  { id: 'ambiguity',   label: 'Ambiguity',    icon: <Diff size={12}/> },
+  { id: 'simplify',    label: 'CNF / Simplify', icon: <Wrench size={12}/> },
+  { id: 'membership',  label: 'Membership',   icon: <Gauge size={12}/> },
+  { id: 'pumping',     label: 'Pumping Lemma',icon: <FlaskConical size={12}/> },
+];
+
+/* SVG Parse Tree */
+function TreeNode({ node, depth = 0, x = 0, y = 0, spread = 120 }:
+  { node: ParseTreeNode; depth?: number; x?: number; y?: number; spread?: number }) {
+  const cols = ['#16a34a','#ea580c','#e11d48','#7c3aed','#0284c7'];
+  const c = cols[depth % cols.length];
+  const childCount = node.children.length;
+  const childSpread = Math.max(32, spread / Math.max(childCount, 1));
+  const startX = x - ((childCount - 1) * childSpread) / 2;
   return (
-    <div className="flex flex-col items-center">
-      <div className={`px-2 py-1 rounded border border-current/30 bg-current/10 text-xs font-mono font-bold ${color} min-w-[28px] text-center`}>
-        {node.symbol}
-      </div>
-      {node.children.length > 0 && (
-        <div className="flex flex-col items-center">
-          <div className="w-px h-3 bg-white/20" />
-          <div className="flex gap-4 items-start justify-center">
-            {node.children.map((child, i) => (
-              <div key={i} className="flex flex-col items-center">
-                <div className="w-px h-3 bg-white/20" />
-                <ParseTreeViz node={child} depth={depth + 1} />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+    <g>
+      {node.children.map((child, i) => {
+        const cx = startX + i * childSpread;
+        const cy = y + 56;
+        return (
+          <g key={i}>
+            <motion.line x1={x} y1={y + 9} x2={cx} y2={cy - 9}
+              stroke="#d6cfc3" strokeWidth="1.5"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: depth * 0.15 }} />
+            <TreeNode node={child} depth={depth + 1} x={cx} y={cy} spread={childSpread * 0.9} />
+          </g>
+        );
+      })}
+      <motion.g initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+        transition={{ delay: depth * 0.15, type: 'spring', stiffness: 300 }}>
+        <circle cx={x} cy={y} r="14" fill={node.isTerminal ? '#faf8f4' : c} stroke={c} strokeWidth="1.5"/>
+        <text x={x} y={y + 4} textAnchor="middle" fontSize="9" fontFamily="JetBrains Mono"
+          fontWeight="700" fill={node.isTerminal ? c : '#fff'}>{node.symbol}</text>
+      </motion.g>
+    </g>
   );
 }
 
 export default function CFGSimulator() {
-  const [rulesText, setRulesText] = useState('S -> aSb | ε');
-  const [startSymbol, setStartSymbol] = useState('S');
-  const [inputString, setInputString] = useState('aabb');
-  const [derivationType, setDerivationType] = useState<'leftmost' | 'rightmost'>('leftmost');
-  const [mode, setMode] = useState<SimMode>('derivation');
+  const [rules, setRules]   = useState('S -> aSb | ε');
+  const [start, setStart]   = useState('S');
+  const [input, setInput]   = useState('aabb');
+  const [mode, setMode]     = useState<Mode>('derivation');
+  const [derivType, setDerivType] = useState<'leftmost'|'rightmost'>('leftmost');
+  const [pumpLen, setPumpLen] = useState(3);
   const [errors, setErrors] = useState<string[]>([]);
 
-  // Simulation state
-  const [steps, setSteps] = useState<DerivationStep[]>([]);
-  const [currentStep, setCurrentStep] = useState(-1);
+  const [steps, setSteps]   = useState<DerivationStep[]>([]);
+  const [curStep, setCurStep] = useState(-1);
+  const [speed, setSpeed]   = useState(2);
   const [isRunning, setIsRunning] = useState(false);
-  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [parseTreeRoot, setParseTreeRoot] = useState<ParseTreeNode | null>(null);
-  const [ambiguityResult, setAmbiguityResult] = useState<ReturnType<typeof detectAmbiguity> | null>(null);
-  const [simplifySteps, setSimplifySteps] = useState<ReturnType<typeof simplifyGrammar>>([]);
-  const [simplifyIdx, setSimplifyIdx] = useState(0);
-  const [cykResult, setCykResult] = useState<ReturnType<typeof cykMembership> | null>(null);
-  const [pumpingResult, setPumpingResult] = useState<ReturnType<typeof simulatePumpingLemma> | null>(null);
-  const [pumpingLength, setPumpingLength] = useState(3);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [treeRoot, setTreeRoot] = useState<ParseTreeNode | null>(null);
+  const [ambData, setAmbData] = useState<ReturnType<typeof detectAmbiguity> | null>(null);
+  const [simplData, setSimplData] = useState<ReturnType<typeof simplifyGrammar>>([]);
+  const [simplIdx, setSimplIdx]   = useState(0);
+  const [cykData,  setCykData]    = useState<ReturnType<typeof cykMembership> | null>(null);
+  const [pumpData, setPumpData]   = useState<ReturnType<typeof simulatePumpingLemma> | null>(null);
 
-  const autoRunRef = useRef<number | null>(null);
+  // animated sentential form for guided mode
+  const [guidedHint, setGuidedHint] = useState('');
 
-  const loadExample = (ex: typeof EXAMPLE_GRAMMARS[0]) => {
-    setRulesText(ex.rules);
-    setStartSymbol(ex.start);
-    setInputString(ex.input);
-    reset();
-  };
+  const autoRef = useRef<number|null>(null);
+  const logRef  = useRef<HTMLDivElement>(null);
 
-  const reset = useCallback(() => {
-    setSteps([]);
-    setCurrentStep(-1);
-    setIsRunning(false);
-    setResult(null);
-    setParseTreeRoot(null);
-    setAmbiguityResult(null);
-    setSimplifySteps([]);
-    setCykResult(null);
-    setPumpingResult(null);
-    setErrors([]);
-    if (autoRunRef.current) clearInterval(autoRunRef.current);
+  const speedMs = [1200, 650, 220][speed - 1];
+
+  const stopAuto = () => { if (autoRef.current) clearInterval(autoRef.current); setIsRunning(false); };
+  const resetAll = useCallback(() => {
+    stopAuto();
+    setSteps([]); setCurStep(-1); setResult(null); setTreeRoot(null);
+    setAmbData(null); setSimplData([]); setCykData(null); setPumpData(null);
+    setErrors([]); setGuidedHint('');
   }, []);
 
-  const simulate = useCallback(() => {
-    reset();
-    const { grammar, errors: gErrors } = parseGrammar(rulesText, startSymbol);
-    if (gErrors.length > 0) { setErrors(gErrors); return; }
-    setErrors([]);
-
+  const runSim = useCallback(() => {
+    resetAll();
+    const { grammar, errors: ge } = parseGrammar(rules, start);
+    if (ge.length) { setErrors(ge); return; }
     if (mode === 'derivation') {
-      const fn = derivationType === 'leftmost' ? deriveLeftmost : deriveRightmost;
-      const { steps: s, success, message } = fn(grammar, inputString);
-      setSteps(s);
-      setResult({ success, message });
-      if (success) {
-        const tree = buildParseTree(grammar, s);
-        setParseTreeRoot(tree);
-      }
-      setCurrentStep(-1);
+      const fn = derivType === 'leftmost' ? deriveLeftmost : deriveRightmost;
+      const { steps: s, success, message } = fn(grammar, input);
+      setSteps(s); setResult({ ok: success, msg: message });
+      if (success) setTreeRoot(buildParseTree(grammar, s));
     } else if (mode === 'parse-tree') {
-      const { steps: s, success, message } = deriveLeftmost(grammar, inputString);
-      setSteps(s);
-      setResult({ success, message });
-      if (success) {
-        const tree = buildParseTree(grammar, s);
-        setParseTreeRoot(tree);
-      }
+      const { steps: s, success, message } = deriveLeftmost(grammar, input);
+      setSteps(s); setResult({ ok: success, msg: message });
+      if (success) setTreeRoot(buildParseTree(grammar, s));
     } else if (mode === 'ambiguity') {
-      const a = detectAmbiguity(grammar, inputString);
-      setAmbiguityResult(a);
+      setAmbData(detectAmbiguity(grammar, input));
     } else if (mode === 'simplify') {
-      const s = simplifyGrammar(grammar);
-      setSimplifySteps(s);
-      setSimplifyIdx(0);
+      setSimplData(simplifyGrammar(grammar)); setSimplIdx(0);
     } else if (mode === 'membership') {
-      const r = cykMembership(grammar, inputString);
-      setCykResult(r);
+      setCykData(cykMembership(grammar, input));
     } else if (mode === 'pumping') {
-      const r = simulatePumpingLemma(grammar, inputString, pumpingLength);
-      setPumpingResult(r);
+      setPumpData(simulatePumpingLemma(grammar, input, pumpLen));
     }
-  }, [rulesText, startSymbol, inputString, derivationType, mode, pumpingLength, reset]);
+    setCurStep(-1);
+  }, [rules, start, input, mode, derivType, pumpLen, resetAll]);
 
-  const nextStep = useCallback(() => {
-    setCurrentStep(prev => Math.min(prev + 1, steps.length - 1));
-  }, [steps.length]);
+  // Auto-run
+  const togglePlay = useCallback(() => {
+    if (isRunning) { stopAuto(); return; }
+    setIsRunning(true);
+    autoRef.current = window.setInterval(() => {
+      setCurStep(p => {
+        if (p >= steps.length - 1) { stopAuto(); return p; }
+        return p + 1;
+      });
+    }, speedMs);
+  }, [isRunning, steps.length, speedMs]);
 
-  const prevStep = useCallback(() => {
-    setCurrentStep(prev => Math.max(prev - 1, -1));
-  }, []);
+  useEffect(() => { if (curStep >= 0 && steps[curStep]) setGuidedHint(steps[curStep].explanation); }, [curStep, steps]);
+  useEffect(() => () => stopAuto(), []);
 
-  const toggleAutoRun = useCallback(() => {
-    if (isRunning) {
-      setIsRunning(false);
-      if (autoRunRef.current) clearInterval(autoRunRef.current);
-    } else {
-      setIsRunning(true);
-      autoRunRef.current = window.setInterval(() => {
-        setCurrentStep(prev => {
-          if (prev >= steps.length - 1) {
-            setIsRunning(false);
-            clearInterval(autoRunRef.current!);
-            return prev;
-          }
-          return prev + 1;
-        });
-      }, 700);
+  // Scroll step log
+  useEffect(() => {
+    if (logRef.current && curStep >= 0) {
+      const el = logRef.current.querySelector(`[data-step="${curStep}"]`);
+      el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
-  }, [isRunning, steps.length]);
+  }, [curStep]);
 
-  useEffect(() => () => { if (autoRunRef.current) clearInterval(autoRunRef.current); }, []);
+  const displaySent = curStep === -1 ? start : (steps[curStep]?.sentential ?? start);
+  const rulesDisplay = (r: { lhs: string; rhs: string[] }[]) =>
+    r.map(x => `${x.lhs} → ${x.rhs.map(p => p||'ε').join(' | ')}`).join('\n');
 
-  const displayedSentential = currentStep === -1
-    ? startSymbol
-    : steps[currentStep]?.sentential ?? startSymbol;
-
-  const modeButtons: { id: SimMode; label: string; icon: React.ReactNode }[] = [
-    { id: 'derivation', label: 'Derivation', icon: <ChevronRight size={13} /> },
-    { id: 'parse-tree', label: 'Parse Tree', icon: <TreePine size={13} /> },
-    { id: 'ambiguity', label: 'Ambiguity', icon: <Diff size={13} /> },
-    { id: 'simplify', label: 'Simplify/CNF', icon: <Wrench size={13} /> },
-    { id: 'membership', label: 'Membership', icon: <Info size={13} /> },
-    { id: 'pumping', label: 'Pumping Lemma', icon: <Beaker size={13} /> },
-  ];
-
-  const rulesDisplay = (rules: { lhs: string; rhs: string[] }[]) =>
-    rules.map(r => `${r.lhs} → ${r.rhs.map(p => p || 'ε').join(' | ')}`).join('\n');
+  const isShaking = result && !result.ok;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
-          <TreePine size={20} className="text-white" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-black text-white">CFG Simulator</h1>
-          <p className="text-white/40 text-sm">Context Free Grammar · Derivations, Parse Trees, Simplification</p>
-        </div>
-      </div>
-
-      {/* Mode Selector */}
-      <div className="flex flex-wrap gap-2 mb-6">
-        {modeButtons.map(b => (
-          <button
-            key={b.id}
-            onClick={() => { setMode(b.id); reset(); }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
-              mode === b.id
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                : 'glass text-white/50 hover:text-white/80'
-            }`}
-          >
-            {b.icon}{b.label}
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 48px)' }}>
+      {/* Mode tabs */}
+      <div className="border-b border-[var(--border)] px-4 py-2 flex items-center gap-2 overflow-x-auto"
+        style={{ background: 'var(--surface)' }}>
+        <span className="pill pill-cfg shrink-0">CFG</span>
+        <span className="w-px h-4 bg-[var(--border)] shrink-0" />
+        {MODES.map(m => (
+          <button key={m.id} onClick={() => { setMode(m.id); resetAll(); }}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all duration-150 shrink-0 ${
+              mode === m.id
+                ? 'bg-[var(--cfg-bg)] text-[var(--cfg)] border-[var(--cfg-border)]'
+                : 'border-transparent text-[var(--ink-3)] hover:border-[var(--border)] hover:text-[var(--ink)]'
+            }`}>
+            {m.icon} {m.label}
           </button>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Left: Input Panel */}
-        <div className="xl:col-span-1 space-y-4">
+      {/* 3-panel workspace */}
+      <div className="flex flex-1 overflow-hidden">
+
+        {/* ── LEFT: Input Panel ─────────────────────────────── */}
+        <div className="w-64 border-r border-[var(--border)] flex flex-col overflow-y-auto shrink-0"
+          style={{ background: 'var(--bg-2)' }}>
           {/* Examples */}
-          <div className="section-card">
-            <div className="flex items-center gap-2 mb-3">
-              <BookOpen size={14} className="text-emerald-400" />
-              <span className="text-xs font-bold text-white/60 uppercase tracking-wider">Examples</span>
-            </div>
-            <div className="space-y-1.5">
-              {EXAMPLE_GRAMMARS.map((ex) => (
-                <button
-                  key={ex.name}
-                  onClick={() => loadExample(ex)}
-                  className="w-full text-left px-3 py-2 rounded-lg glass-hover text-xs"
-                >
-                  <div className="font-semibold text-white/80">{ex.name}</div>
-                  <div className="text-white/40 mt-0.5">{ex.description}</div>
+          <div className="p-3 border-b border-[var(--border)]">
+            <div className="section-label flex items-center gap-1"><BookOpen size={10}/> Examples</div>
+            <div className="space-y-1">
+              {EXAMPLES.map(ex => (
+                <button key={ex.name} onClick={() => { setRules(ex.rules); setStart(ex.start); setInput(ex.input); resetAll(); }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[var(--surface)] border border-transparent hover:border-[var(--border)] transition-all text-xs">
+                  <div className="font-semibold text-[var(--ink)]">{ex.name}</div>
+                  <div className="text-[var(--ink-3)] mt-0.5 font-mono text-[10px]">{ex.desc}</div>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Grammar Input */}
-          <div className="section-card space-y-3">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-bold text-white/60 uppercase tracking-wider">Grammar Definition</span>
+          {/* Inputs */}
+          <div className="p-3 space-y-3 flex-1">
+            <div>
+              <div className="section-label">Production Rules</div>
+              <textarea className="code-input h-28" value={rules} onChange={e => setRules(e.target.value)}
+                placeholder="S -> aSb | ε"/>
+              <p className="text-[10px] text-[var(--ink-3)] mt-1 font-mono">Use | for alternatives, ε for empty</p>
             </div>
             <div>
-              <label className="label">Production Rules</label>
-              <textarea
-                className="input-field h-28 resize-none"
-                value={rulesText}
-                onChange={e => setRulesText(e.target.value)}
-                placeholder="S -> aSb | ε&#10;A -> aA | a"
-              />
-              <p className="text-white/30 text-xs mt-1">One rule per line. Use | for alternatives. Use ε for empty.</p>
+              <div className="section-label">Start Symbol</div>
+              <input className="code-input-field" value={start} onChange={e => setStart(e.target.value)}/>
             </div>
             <div>
-              <label className="label">Start Symbol</label>
-              <input className="input-field" value={startSymbol} onChange={e => setStartSymbol(e.target.value)} placeholder="S" />
+              <div className="section-label">Input String</div>
+              <input className="code-input-field" value={input} onChange={e => setInput(e.target.value)} placeholder="aabb"/>
             </div>
-            <div>
-              <label className="label">Input String</label>
-              <input className="input-field" value={inputString} onChange={e => setInputString(e.target.value)} placeholder="aabb" />
-              <p className="text-white/30 text-xs mt-1">Enter ε for empty string</p>
-            </div>
-
             {mode === 'derivation' && (
               <div>
-                <label className="label">Derivation Type</label>
-                <div className="flex gap-2">
-                  {(['leftmost', 'rightmost'] as const).map(t => (
-                    <button key={t} onClick={() => setDerivationType(t)}
-                      className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${derivationType === t ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'glass text-white/50'}`}>
-                      {t === 'leftmost' ? 'Leftmost' : 'Rightmost'}
-                    </button>
+                <div className="section-label">Derivation Type</div>
+                <div className="flex gap-1.5">
+                  {(['leftmost','rightmost'] as const).map(t => (
+                    <button key={t} onClick={() => setDerivType(t)}
+                      className={`flex-1 py-1 rounded-lg text-[11px] font-semibold border transition-all ${
+                        derivType === t ? 'bg-[var(--cfg-bg)] text-[var(--cfg)] border-[var(--cfg-border)]' : 'border-[var(--border)] text-[var(--ink-3)]'
+                      }`}>{t}</button>
                   ))}
                 </div>
               </div>
             )}
             {mode === 'pumping' && (
               <div>
-                <label className="label">Pumping Length (p)</label>
-                <input type="number" className="input-field" value={pumpingLength} onChange={e => setPumpingLength(+e.target.value)} min={1} max={20} />
+                <div className="section-label">Pumping Length (p)</div>
+                <input type="number" className="code-input-field" value={pumpLen}
+                  onChange={e => setPumpLen(+e.target.value)} min={1} max={20}/>
               </div>
             )}
-
             {errors.length > 0 && (
-              <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-3">
-                {errors.map((e, i) => <p key={i} className="text-red-400 text-xs">{e}</p>)}
+              <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2 font-mono space-y-0.5">
+                {errors.map((e,i) => <p key={i}>{e}</p>)}
               </div>
             )}
-
-            <button onClick={simulate} className="btn-primary w-full justify-center">
-              <Play size={14} /> Run Simulation
+            <button onClick={runSim} className="btn-cfg w-full justify-center">
+              ▶ Run Simulation
             </button>
+            {(steps.length > 0 || result || ambData || cykData || pumpData) && (
+              <button onClick={resetAll} className="btn-outline w-full justify-center">
+                <RotateCcw size={12}/> Reset
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Right: Visualization Panel */}
-        <div className="xl:col-span-2 space-y-4">
-          {/* Derivation Mode */}
-          {mode === 'derivation' && (
-            <>
-              {/* Current Sentential Form */}
-              <div className="section-card">
-                <p className="label mb-2">Current Sentential Form</p>
-                <div className="flex items-center justify-center py-4 px-6 rounded-lg bg-black/30 border border-white/5 min-h-16">
-                  <motion.span
-                    key={displayedSentential}
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="text-2xl font-mono font-bold text-white tracking-wider"
+        {/* ── CENTER: Stage ─────────────────────────────────── */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 overflow-auto p-5 dot-grid">
+
+            {/* Derivation Mode */}
+            {mode === 'derivation' && (
+              <div className="space-y-4">
+                {/* Sentential form display */}
+                <div className="card p-5 text-center min-h-24 flex flex-col items-center justify-center">
+                  <p className="section-label mb-2">Sentential Form</p>
+                  <motion.div
+                    key={displaySent}
+                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                    className={`text-3xl font-black font-mono tracking-widest text-[var(--ink)] ${isShaking ? 'animate-shake' : ''}`}
+                    style={result?.ok && curStep === steps.length - 1 ? { color: 'var(--cfg)' } : {}}
                   >
-                    {displayedSentential || 'ε'}
-                  </motion.span>
+                    {displaySent || 'ε'}
+                  </motion.div>
+                  {result?.ok && curStep === steps.length - 1 && (
+                    <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
+                      className="result-accept mt-3 animate-pulse-ring">
+                      ✓ Derived successfully
+                    </motion.div>
+                  )}
                 </div>
-                {currentStep >= 0 && steps[currentStep] && (
-                  <div className="mt-3 p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
-                    <p className="text-xs font-semibold text-emerald-400 mb-1">Applied: {steps[currentStep].rule}</p>
-                    <p className="text-xs text-white/50">{steps[currentStep].explanation}</p>
+
+                {/* Guided hint */}
+                <AnimatePresence mode="wait">
+                  {guidedHint && curStep >= 0 && (
+                    <motion.div key={curStep}
+                      initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}
+                      className="card p-3 border-l-4"
+                      style={{ borderLeftColor: 'var(--cfg)' }}>
+                      <p className="text-xs font-mono text-[var(--ink-3)] mb-0.5">Now applying:</p>
+                      <p className="text-sm font-bold text-[var(--ink)]">{steps[curStep]?.rule}</p>
+                      <p className="text-xs text-[var(--ink-3)] mt-1">{guidedHint}</p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Result failure */}
+                {result && !result.ok && (
+                  <div className="result-reject">{result.msg}</div>
+                )}
+
+                {/* Parse tree */}
+                {treeRoot && result?.ok && curStep === steps.length - 1 && (
+                  <div className="card p-4 overflow-x-auto">
+                    <p className="section-label mb-3">Parse Tree</p>
+                    <svg style={{ minWidth: 300, overflow: 'visible' }} height={280}>
+                      <TreeNode node={treeRoot} x={300} y={30} spread={120} />
+                    </svg>
                   </div>
                 )}
               </div>
+            )}
 
-              {/* Controls */}
-              {steps.length > 0 && (
-                <div className="section-card">
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => setCurrentStep(-1)} className="btn-secondary" disabled={currentStep === -1}>
-                      <SkipBack size={14} />
-                    </button>
-                    <button onClick={prevStep} className="btn-secondary" disabled={currentStep <= -1}>
-                      ‹ Prev
-                    </button>
-                    <button onClick={toggleAutoRun} className={isRunning ? 'btn-accent' : 'btn-primary'}>
-                      {isRunning ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Auto Run</>}
-                    </button>
-                    <button onClick={nextStep} className="btn-secondary" disabled={currentStep >= steps.length - 1}>
-                      Next ›
-                    </button>
-                    <button onClick={() => setCurrentStep(steps.length - 1)} className="btn-secondary">
-                      <SkipForward size={14} />
-                    </button>
-                    <button onClick={reset} className="btn-secondary ml-auto">
-                      <RotateCcw size={14} /> Reset
-                    </button>
+            {/* Parse Tree Mode */}
+            {mode === 'parse-tree' && (
+              <div className="space-y-4">
+                {treeRoot && (
+                  <div className="card p-5 overflow-x-auto">
+                    <p className="section-label mb-3">Parse Tree for "{input}"</p>
+                    <svg style={{ minWidth: 400, overflow: 'visible' }} height={320}>
+                      <TreeNode node={treeRoot} x={400} y={30} spread={140} />
+                    </svg>
                   </div>
-                  <div className="mt-2 h-1 bg-white/5 rounded-full overflow-hidden">
-                    <motion.div
-                      className="h-full bg-gradient-to-r from-emerald-500 to-teal-400"
-                      animate={{ width: steps.length > 0 ? `${((currentStep + 1) / steps.length) * 100}%` : '0%' }}
-                    />
+                )}
+                {result && !result.ok && <div className="result-reject">{result.msg}</div>}
+                {!treeRoot && !result && (
+                  <div className="card flex flex-col items-center justify-center py-16 text-center text-[var(--ink-3)]">
+                    <TreePine size={36} className="mb-3 opacity-20"/>
+                    <p className="text-sm">Click Run Simulation to generate the parse tree.</p>
                   </div>
-                  <p className="text-xs text-white/30 mt-1">Step {Math.max(0, currentStep + 1)} / {steps.length}</p>
-                </div>
-              )}
+                )}
+              </div>
+            )}
 
-              {/* Result */}
-              {result && (
-                <div className={`section-card border ${result.success ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
-                  <p className={`font-bold text-sm ${result.success ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {result.success ? '✓ Derivation Successful' : '✗ Derivation Failed'}
-                  </p>
-                  {result.message && <p className="text-white/50 text-xs mt-1">{result.message}</p>}
+            {/* Ambiguity Mode */}
+            {mode === 'ambiguity' && ambData && (
+              <div className="space-y-4">
+                <div className={ambData.isAmbiguous ? 'result-warn' : 'result-accept'}>
+                  {ambData.isAmbiguous ? '⚠ AMBIGUOUS grammar detected' : '✓ No ambiguity detected'}
                 </div>
-              )}
-
-              {/* Derivation Steps Table */}
-              {steps.length > 0 && (
-                <div className="section-card overflow-x-auto">
-                  <p className="label mb-3">Derivation Sequence</p>
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b border-white/10">
-                        <th className="text-left py-2 px-2 text-white/40 font-semibold w-10">#</th>
-                        <th className="text-left py-2 px-2 text-white/40 font-semibold">Sentential Form</th>
-                        <th className="text-left py-2 px-2 text-white/40 font-semibold">Rule Applied</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr className="border-b border-white/5">
-                        <td className="py-2 px-2 text-white/30">0</td>
-                        <td className="py-2 px-2 font-mono text-primary-300">{startSymbol}</td>
-                        <td className="py-2 px-2 text-white/30 italic">Start</td>
-                      </tr>
-                      {steps.map((s, i) => (
-                        <motion.tr
-                          key={i}
-                          className={`border-b border-white/5 cursor-pointer transition-colors ${i === currentStep ? 'bg-emerald-500/10' : 'hover:bg-white/3'}`}
-                          onClick={() => setCurrentStep(i)}
-                          animate={i === currentStep ? { backgroundColor: 'rgba(16,185,129,0.1)' } : {}}
-                        >
-                          <td className="py-2 px-2 text-white/30">{i + 1}</td>
-                          <td className="py-2 px-2 font-mono text-white">{s.sentential || 'ε'}</td>
-                          <td className="py-2 px-2 text-emerald-400/80">{s.rule}</td>
-                        </motion.tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Parse Tree Mode */}
-          {mode === 'parse-tree' && (
-            <>
-              <button onClick={simulate} className="btn-primary">
-                <Play size={14} /> Generate Parse Tree
-              </button>
-              {parseTreeRoot && (
-                <div className="section-card overflow-auto">
-                  <p className="label mb-4">Parse Tree for "{inputString}"</p>
-                  <div className="flex justify-center py-4 overflow-x-auto">
-                    <ParseTreeViz node={parseTreeRoot} />
+                <p className="text-xs text-[var(--ink-3)] font-mono leading-relaxed">{ambData.explanation}</p>
+                {ambData.isAmbiguous && (
+                  <div className="grid grid-cols-2 gap-4">
+                    {[ambData.derivation1, ambData.derivation2].map((d, idx) => (
+                      <div key={idx} className="card p-4">
+                        <p className="section-label mb-2">Derivation {idx + 1} ({idx === 0 ? 'Leftmost' : 'Rightmost'})</p>
+                        <div className="space-y-1 font-mono text-xs">
+                          {d.map((s, i) => (
+                            <div key={i} className="flex gap-2">
+                              <span className="text-[var(--ink-3)]">{i+1}.</span>
+                              <span className="text-[var(--ink)]">{s.sentential}</span>
+                              <span className="ml-auto text-[var(--cfg)] opacity-70">{s.rule}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                </div>
-              )}
-              {result && !result.success && (
-                <div className="section-card border border-red-500/30 bg-red-500/5">
-                  <p className="text-red-400 text-sm font-bold">✗ {result.message}</p>
-                </div>
-              )}
-            </>
-          )}
+                )}
+              </div>
+            )}
 
-          {/* Ambiguity Mode */}
-          {mode === 'ambiguity' && (
-            <>
-              <button onClick={simulate} className="btn-primary">
-                <Play size={14} /> Detect Ambiguity
-              </button>
-              {ambiguityResult && (
-                <>
-                  <div className={`section-card border ${ambiguityResult.isAmbiguous ? 'border-yellow-500/30 bg-yellow-500/5' : 'border-emerald-500/30 bg-emerald-500/5'}`}>
-                    <p className={`font-bold text-sm ${ambiguityResult.isAmbiguous ? 'text-yellow-400' : 'text-emerald-400'}`}>
-                      {ambiguityResult.isAmbiguous ? '⚠ Grammar is AMBIGUOUS' : '✓ No Ambiguity Detected'}
-                    </p>
-                    <p className="text-white/50 text-xs mt-1">{ambiguityResult.explanation}</p>
-                  </div>
-                  {ambiguityResult.isAmbiguous && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {[ambiguityResult.derivation1, ambiguityResult.derivation2].map((d, idx) => (
-                        <div key={idx} className="section-card">
-                          <p className="label mb-2">Derivation {idx + 1} ({idx === 0 ? 'Leftmost' : 'Rightmost'})</p>
-                          <div className="space-y-1">
-                            {d.map((s, i) => (
-                              <div key={i} className="text-xs font-mono flex gap-2">
-                                <span className="text-white/30 w-6">{i + 1}.</span>
-                                <span className="text-white">{s.sentential}</span>
-                                <span className="text-emerald-400/60 ml-auto">{s.rule}</span>
-                              </div>
-                            ))}
-                          </div>
+            {/* Simplify / CNF */}
+            {mode === 'simplify' && simplData.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex gap-1.5 flex-wrap">
+                  {simplData.map((s, i) => (
+                    <button key={i} onClick={() => setSimplIdx(i)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                        simplIdx === i ? 'bg-[var(--cfg-bg)] text-[var(--cfg)] border-[var(--cfg-border)]' : 'border-[var(--border)] text-[var(--ink-3)]'
+                      }`}>
+                      {i+1}. {s.name}
+                    </button>
+                  ))}
+                </div>
+                <AnimatePresence mode="wait">
+                  <motion.div key={simplIdx} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                    className="card p-5">
+                    <p className="font-bold text-[var(--cfg)] mb-1">{simplData[simplIdx].name}</p>
+                    <p className="text-xs text-[var(--ink-3)] mb-4 font-mono leading-relaxed">{simplData[simplIdx].description}</p>
+                    <div className="grid grid-cols-2 gap-4">
+                      {[
+                        { label: 'Before', data: simplData[simplIdx].before, color: 'text-[var(--ink-2)]' },
+                        { label: 'After',  data: simplData[simplIdx].after,  color: 'text-[var(--cfg)]' },
+                      ].map(({ label, data, color }) => (
+                        <div key={label}>
+                          <p className="section-label mb-1.5">{label}</p>
+                          <pre className={`font-mono text-xs leading-relaxed p-3 rounded-lg border border-[var(--border)] bg-[var(--bg-2)] ${color}`}>
+                            {rulesDisplay(data)}
+                          </pre>
                         </div>
                       ))}
                     </div>
-                  )}
-                </>
-              )}
-            </>
-          )}
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+            )}
 
-          {/* Simplify / CNF Mode */}
-          {mode === 'simplify' && (
-            <>
-              <button onClick={simulate} className="btn-primary">
-                <Play size={14} /> Start Simplification
-              </button>
-              {simplifySteps.length > 0 && (
-                <>
-                  <div className="flex gap-2 flex-wrap">
-                    {simplifySteps.map((s, i) => (
-                      <button key={i} onClick={() => setSimplifyIdx(i)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${simplifyIdx === i ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'glass text-white/50'}`}>
-                        {i + 1}. {s.name}
-                      </button>
-                    ))}
-                  </div>
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={simplifyIdx}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      className="section-card"
-                    >
-                      <p className="text-sm font-bold text-emerald-400 mb-1">Step {simplifyIdx + 1}: {simplifySteps[simplifyIdx].name}</p>
-                      <p className="text-xs text-white/50 mb-4">{simplifySteps[simplifyIdx].description}</p>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <p className="label mb-2">Before</p>
-                          <pre className="text-xs font-mono text-white/60 bg-black/20 rounded-lg p-3 whitespace-pre-wrap">
-                            {rulesDisplay(simplifySteps[simplifyIdx].before)}
-                          </pre>
-                        </div>
-                        <div>
-                          <p className="label mb-2">After</p>
-                          <pre className="text-xs font-mono text-emerald-300 bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3 whitespace-pre-wrap">
-                            {rulesDisplay(simplifySteps[simplifyIdx].after)}
-                          </pre>
-                        </div>
-                      </div>
-                    </motion.div>
-                  </AnimatePresence>
-                </>
-              )}
-            </>
-          )}
-
-          {/* Membership / CYK Mode */}
-          {mode === 'membership' && (
-            <>
-              <button onClick={simulate} className="btn-primary">
-                <Play size={14} /> Test Membership (CYK)
-              </button>
-              {cykResult && (
-                <>
-                  <div className={`section-card border ${cykResult.accepted ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
-                    <p className={`font-bold text-sm ${cykResult.accepted ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {cykResult.accepted ? `✓ "${inputString}" ∈ L(G) — Accepted` : `✗ "${inputString}" ∉ L(G) — Rejected`}
-                    </p>
-                  </div>
-                  <div className="section-card">
-                    <p className="label mb-3">CYK Table Computation</p>
-                    <div className="space-y-1">
-                      {cykResult.explanation.map((line, i) => (
-                        <div key={i} className="flex items-start gap-2 text-xs">
-                          <span className="text-white/20 font-mono w-4">{i + 1}</span>
-                          <span className={line.includes('✓') ? 'text-emerald-400' : line.includes('✗') ? 'text-red-400' : 'text-white/60'}>{line}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-
-          {/* Pumping Lemma Mode */}
-          {mode === 'pumping' && (
-            <>
-              <button onClick={simulate} className="btn-primary">
-                <Beaker size={14} /> Simulate Pumping
-              </button>
-              {pumpingResult && (
-                <div className="section-card">
-                  <p className="label mb-3">Pumping Lemma Simulation</p>
-                  <div className="grid grid-cols-3 gap-3 mb-4">
-                    {(['u', 'v', 'w'] as const).map(part => (
-                      <div key={part} className="rounded-lg bg-black/20 p-3 text-center border border-white/5">
-                        <p className="text-xs text-white/40 mb-1 font-semibold uppercase">{part}</p>
-                        <p className="text-lg font-mono font-bold text-white">"{pumpingResult.parts[part] || 'ε'}"</p>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="space-y-2 mb-4">
-                    <p className="text-xs font-semibold text-white/60">Pumped Strings:</p>
-                    {Object.entries(pumpingResult.pumped).map(([k, s]) => (
-                      <div key={k} className="flex items-center gap-3 text-xs">
-                        <span className="text-white/30 w-16">pump({k}):</span>
-                        <span className="font-mono text-white bg-black/30 px-2 py-0.5 rounded">{s || 'ε'}</span>
-                      </div>
-                    ))}
-                  </div>
+            {/* Membership / CYK */}
+            {mode === 'membership' && cykData && (
+              <div className="space-y-4">
+                <div className={cykData.accepted ? 'result-accept' : 'result-reject'}>
+                  {cykData.accepted ? `✓ "${input}" ∈ L(G) — Accepted` : `✗ "${input}" ∉ L(G) — Rejected`}
+                </div>
+                <div className="card p-4">
+                  <p className="section-label mb-3">CYK Table Steps</p>
                   <div className="space-y-1">
-                    {pumpingResult.explanation.map((line, i) => (
-                      <p key={i} className="text-xs text-white/50">{line}</p>
+                    {cykData.explanation.map((line, i) => (
+                      <div key={i} className="flex items-start gap-2 text-xs font-mono">
+                        <span className="text-[var(--ink-3)] w-4 shrink-0">{i+1}</span>
+                        <span className={line.includes('✓') ? 'text-[var(--cfg)]' : line.includes('✗') ? 'text-[var(--tm)]' : 'text-[var(--ink-2)]'}>
+                          {line}
+                        </span>
+                      </div>
                     ))}
                   </div>
                 </div>
-              )}
-            </>
+              </div>
+            )}
+
+            {/* Pumping Lemma */}
+            {mode === 'pumping' && pumpData && (
+              <div className="space-y-4">
+                <div className="card p-5">
+                  <p className="section-label mb-3">String Decomposition: s = u·v·w</p>
+                  <div className="flex gap-3 mb-5">
+                    {(['u','v','w'] as const).map(p => (
+                      <div key={p} className="flex-1 border-2 border-[var(--border)] rounded-xl p-3 text-center">
+                        <p className="section-label mb-1">{p}</p>
+                        <p className="font-mono text-xl font-black text-[var(--ink)]">"{pumpData.parts[p] || 'ε'}"</p>
+                        <p className="text-[10px] text-[var(--ink-3)] mt-1">len = {pumpData.parts[p].length}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="section-label mb-2">Pumped Strings (uv^k w)</p>
+                  <div className="space-y-1.5">
+                    {Object.entries(pumpData.pumped).map(([k, s]) => (
+                      <div key={k} className="flex items-center gap-3 text-sm font-mono">
+                        <span className="text-[var(--ink-3)] w-16">k = {k}:</span>
+                        <span className="bg-[var(--bg-2)] border border-[var(--border)] px-2 py-0.5 rounded text-[var(--ink)]">
+                          "{s || 'ε'}"
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 space-y-1 border-t border-[var(--border)] pt-3">
+                    {pumpData.explanation.map((line, i) => (
+                      <p key={i} className="text-xs font-mono text-[var(--ink-3)]">{line}</p>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Empty state */}
+            {mode === 'derivation' && steps.length === 0 && !result && (
+              <div className="flex flex-col items-center justify-center h-48 text-center text-[var(--ink-3)]">
+                <div className="text-4xl mb-3 opacity-20">S</div>
+                <p className="text-sm">Configure your grammar and click <strong>Run Simulation</strong>.</p>
+                <p className="text-xs mt-2 font-mono opacity-60">CFG · {derivType} derivation</p>
+              </div>
+            )}
+          </div>
+
+          {/* Playback bar */}
+          {(mode === 'derivation') && (
+            <PlaybackBar
+              currentStep={curStep}
+              totalSteps={steps.length}
+              isRunning={isRunning}
+              speed={speed}
+              onFirst={() => setCurStep(-1)}
+              onPrev={() => setCurStep(p => Math.max(-1, p - 1))}
+              onNext={() => setCurStep(p => Math.min(steps.length - 1, p + 1))}
+              onLast={() => setCurStep(steps.length - 1)}
+              onTogglePlay={togglePlay}
+              onSpeedChange={s => { setSpeed(s); if (isRunning) { stopAuto(); } }}
+              accentClass="btn-cfg"
+              accentColor="var(--cfg)"
+            />
           )}
         </div>
+
+        {/* ── RIGHT: Step Log ───────────────────────────────── */}
+        {mode === 'derivation' && steps.length > 0 && (
+          <div className="w-72 border-l border-[var(--border)] flex flex-col shrink-0 overflow-hidden"
+            style={{ background: 'var(--surface)' }}>
+            <div className="p-3 border-b border-[var(--border)]">
+              <p className="section-label">Derivation Steps</p>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1" ref={logRef}>
+              <div className="step-card" onClick={() => setCurStep(-1)}>
+                <p className="font-mono text-xs font-bold text-[var(--ink-3)]">0. Start</p>
+                <p className="font-mono text-sm font-black text-[var(--ink)]">{start}</p>
+              </div>
+              {steps.map((s, i) => (
+                <div key={i} data-step={i}
+                  onClick={() => setCurStep(i)}
+                  className={`step-card ${curStep === i ? 'active' : ''}`}
+                  style={curStep === i ? { borderColor: 'var(--cfg)' } : {}}>
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="font-mono text-[10px] text-[var(--ink-3)]">{i+1}.</span>
+                    <span className="font-mono text-[10px] font-bold" style={{ color: 'var(--cfg)' }}>{s.rule}</span>
+                  </div>
+                  <p className="font-mono text-sm font-bold text-[var(--ink)] break-all">{s.sentential || 'ε'}</p>
+                  <p className="text-[10px] text-[var(--ink-3)] mt-0.5 leading-tight">{s.explanation}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
