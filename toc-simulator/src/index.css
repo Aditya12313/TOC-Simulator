@@ -27,6 +27,30 @@
   --tm-border:   #fda4af;
 }
 
+/* ── Dark Mode Overrides ────────────────────────────────────────── */
+.dark {
+  --bg:          #0f1117;
+  --bg-2:        #171923;
+  --ink:         #f0ece4;
+  --ink-2:       #bdb5a8;
+  --ink-3:       #6b6760;
+  --surface:     #1a1f2e;
+  --border:      #2e3347;
+
+  --cfg:         #4ade80;
+  --cfg-bg:      #052e16;
+  --cfg-border:  #166534;
+
+  --pda:         #fb923c;
+  --pda-bg:      #1c0a00;
+  --pda-border:  #9a3412;
+
+  --tm:          #fb7185;
+  --tm-bg:       #1f0713;
+  --tm-border:   #9f1239;
+}
+
+
 @layer base {
   * { box-sizing: border-box; }
 
@@ -269,6 +293,7 @@
   .dot-grid {
     background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
     background-size: 24px 24px;
+    background-color: var(--bg);
   }
 }
 
