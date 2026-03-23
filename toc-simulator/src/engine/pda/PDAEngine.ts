@@ -223,6 +223,120 @@ function buildExplanation(t: PDATransition, from: PDAConfiguration, to: PDAConfi
   return `Apply δ(${from.state}, ${inp}, ${top}) = (${to.state}, ${push}):${stateChange}${stackChange}`;
 }
 
+// ─────────────── NEW ADVANCED FEATURES ───────────────
+
+// Path Tree node for nondeterministic visualization
+export interface PDAPathNode {
+  id: string;
+  config: PDAConfiguration;
+  stepNum: number;
+  transition: PDATransition | null;
+  explanation: string;
+  children: PDAPathNode[];
+  isAccepting: boolean;
+  isDead: boolean; // no transitions can fire
+  isLoop: boolean; // repeated configuration
+}
+
+// Build a path tree from BFS (track parent relationships)
+export function buildPathTree(
+  pda: PDADefinition,
+  input: string,
+  mode: 'final-state' | 'empty-stack' = 'final-state',
+  maxNodes = 200
+): { root: PDAPathNode; totalNodes: number } {
+  const initialConfig: PDAConfiguration = {
+    state: pda.startState,
+    remainingInput: input,
+    stack: [pda.initialStackSymbol],
+  };
+
+  const rootNode: PDAPathNode = {
+    id: '0',
+    config: initialConfig,
+    stepNum: 0,
+    transition: null,
+    explanation: `Start: (${pda.startState}, "${input}", [${pda.initialStackSymbol}])`,
+    children: [],
+    isAccepting: isAcceptingConfig(initialConfig, pda, mode),
+    isDead: false,
+    isLoop: false,
+  };
+
+  let nodeCount = 1;
+
+  function isAcceptingConfig(cfg: PDAConfiguration, p: PDADefinition, m: 'final-state' | 'empty-stack') {
+    if (cfg.remainingInput.length > 0) return false;
+    if (m === 'final-state') return p.acceptStates.includes(cfg.state);
+    return cfg.stack.length === 0;
+  }
+
+  function grow(node: PDAPathNode, visited: Set<string>, depth: number): void {
+    if (nodeCount >= maxNodes || depth > 30) return;
+    if (node.isAccepting || node.isDead || node.isLoop) return;
+
+    const applicable = getApplicableTransitions(node.config, pda);
+    if (applicable.length === 0) { node.isDead = true; return; }
+
+    for (const t of applicable) {
+      if (nodeCount >= maxNodes) break;
+      const newConfig = applyTransition(node.config, t);
+      const key = JSON.stringify(newConfig);
+      const isLoop = visited.has(key);
+
+      const child: PDAPathNode = {
+        id: `${node.id}-${node.children.length}`,
+        config: newConfig,
+        stepNum: node.stepNum + 1,
+        transition: t,
+        explanation: buildExplanation(t, node.config, newConfig),
+        children: [],
+        isAccepting: isAcceptingConfig(newConfig, pda, mode),
+        isDead: false,
+        isLoop,
+      };
+      node.children.push(child);
+      nodeCount++;
+
+      if (!isLoop) {
+        const newVisited = new Set(visited);
+        newVisited.add(key);
+        grow(child, newVisited, depth + 1);
+      }
+    }
+  }
+
+  const initKey = JSON.stringify(initialConfig);
+  grow(rootNode, new Set([initKey]), 0);
+
+  return { root: rootNode, totalNodes: nodeCount };
+}
+
+// Get all accepting paths (linear paths from root to accept leaves)
+export function getAllAcceptingPaths(
+  pda: PDADefinition,
+  input: string,
+  mode: 'final-state' | 'empty-stack' = 'final-state',
+  maxPaths = 10
+): PDAStep[][] {
+  const trace = simulatePDA(pda, input, mode, 500);
+  return (trace.allPaths || []).filter(p => {
+    const last = p[p.length - 1];
+    return last.isAccepting;
+  }).slice(0, maxPaths);
+}
+
+// Detect if a single linear path has a repeated configuration (infinite loop)
+export function detectInfiniteLoopInPath(steps: PDAStep[]): { hasLoop: boolean; loopStartStep: number } {
+  const seen = new Map<string, number>();
+  for (const step of steps) {
+    const key = JSON.stringify(step.config);
+    if (seen.has(key)) return { hasLoop: true, loopStartStep: seen.get(key)! };
+    seen.set(key, step.stepNum);
+  }
+  return { hasLoop: false, loopStartStep: -1 };
+}
+
 // CFG to PDA conversion (generates a PDA that simulates leftmost derivation)
 export function cfgToPDA(grammar: { rules: { lhs: string; rhs: string[] }[]; startSymbol: string }): {
   pda: PDADefinition;
