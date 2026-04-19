@@ -38,7 +38,137 @@ export interface PDATrace {
   acceptanceMode: 'final-state' | 'empty-stack';
   message: string;
   allPaths?: PDAStep[][];
+  stopReason: PDAStopReason;
+  loopDetected: boolean;
 }
+
+export type PDAStopReason =
+  | 'accepted-final'
+  | 'accepted-empty'
+  | 'rejected-no-transition'
+  | 'rejected'
+  | 'loop'
+  | 'stepLimit'
+  | 'stopped';
+
+export const PDA_DEFAULT_MAX_STEPS = 800;
+
+export interface PDAExample {
+  name: string;
+  description: string;
+  category: 'Basic Machines' | 'Language Recognizers' | 'Stack-based Patterns';
+  definition: string;
+  input: string;
+  educationalNotes: string;
+}
+
+export const PDA_EXAMPLES: PDAExample[] = [
+  {
+    name: 'a^n b^n recognizer',
+    description: 'Recognizes strings where #a equals #b in ordered form.',
+    category: 'Language Recognizers',
+    input: 'aaabbb',
+    educationalNotes: 'Push one marker for each a, then pop one marker for each b. Accept when input ends and only the bottom marker remains.',
+    definition: `# PDA for a^n b^n
+states: q0,q1,q_accept
+input: a,b
+stack: A,Z
+start: q0
+initial_stack: Z
+accept: q_accept
+δ(q0,a,Z) = (q0,AZ)
+δ(q0,a,A) = (q0,AA)
+δ(q0,b,A) = (q1,ε)
+δ(q1,b,A) = (q1,ε)
+δ(q1,ε,Z) = (q_accept,Z)
+δ(q0,ε,Z) = (q_accept,Z)`,
+  },
+  {
+    name: 'Balanced parentheses',
+    description: 'Checks if parentheses are properly balanced.',
+    category: 'Basic Machines',
+    input: '(()())',
+    educationalNotes: 'Push a marker for each opening parenthesis and pop for each closing one. Accept when the stack returns to the bottom marker.',
+    definition: `# PDA for balanced parentheses
+states: q0,q_accept
+input: (,)
+stack: P,Z
+start: q0
+initial_stack: Z
+accept: q_accept
+δ(q0,(,Z) = (q0,PZ)
+δ(q0,(,P) = (q0,PP)
+δ(q0,),P) = (q0,ε)
+δ(q0,ε,Z) = (q_accept,Z)`,
+  },
+  {
+    name: 'Palindrome checker',
+    description: 'Checks palindromes over {a,b} with center marker c.',
+    category: 'Language Recognizers',
+    input: 'abcba',
+    educationalNotes: 'Push symbols until c, then match and pop mirrored symbols while reading the rest of the input.',
+    definition: `# PDA palindrome checker with center marker c
+states: q_push,q_pop,q_accept
+input: a,b,c
+stack: A,B,Z
+start: q_push
+initial_stack: Z
+accept: q_accept
+δ(q_push,a,Z) = (q_push,AZ)
+δ(q_push,b,Z) = (q_push,BZ)
+δ(q_push,a,A) = (q_push,AA)
+δ(q_push,a,B) = (q_push,AB)
+δ(q_push,b,A) = (q_push,BA)
+δ(q_push,b,B) = (q_push,BB)
+δ(q_push,c,Z) = (q_pop,Z)
+δ(q_push,c,A) = (q_pop,A)
+δ(q_push,c,B) = (q_pop,B)
+δ(q_pop,a,A) = (q_pop,ε)
+δ(q_pop,b,B) = (q_pop,ε)
+δ(q_pop,ε,Z) = (q_accept,Z)`,
+  },
+  {
+    name: 'Equal number of a\'s and b\'s',
+    description: 'Accepts strings with equal counts of a and b in any order.',
+    category: 'Basic Machines',
+    input: 'abbaba',
+    educationalNotes: 'Use stack cancellation: unmatched a markers cancel with b and vice versa. Accept when only bottom marker remains.',
+    definition: `# PDA for equal number of a and b
+states: q0,q_accept
+input: a,b
+stack: A,B,Z
+start: q0
+initial_stack: Z
+accept: q_accept
+δ(q0,a,Z) = (q0,AZ)
+δ(q0,a,A) = (q0,AA)
+δ(q0,a,B) = (q0,ε)
+δ(q0,b,Z) = (q0,BZ)
+δ(q0,b,B) = (q0,BB)
+δ(q0,b,A) = (q0,ε)
+δ(q0,ε,Z) = (q_accept,Z)`,
+  },
+  {
+    name: 'a^n b^m c^m',
+    description: 'Ignores a^n, then matches b^m and c^m using stack.',
+    category: 'Stack-based Patterns',
+    input: 'aabbbccc',
+    educationalNotes: 'Read and ignore initial a\'s. Push one marker per b, then pop one per c. Accept when all pushed markers are consumed.',
+    definition: `# PDA for a^n b^m c^m
+states: q0,q1,q2,q_accept
+input: a,b,c
+stack: B,Z
+start: q0
+initial_stack: Z
+accept: q_accept
+δ(q0,a,Z) = (q0,Z)
+δ(q0,b,Z) = (q1,BZ)
+δ(q1,b,B) = (q1,BB)
+δ(q1,c,B) = (q2,ε)
+δ(q2,c,B) = (q2,ε)
+δ(q2,ε,Z) = (q_accept,Z)`,
+  },
+];
 
 export function parsePDADefinition(input: string): { pda: PDADefinition | null; errors: string[] } {
   const errors: string[] = [];
@@ -67,7 +197,7 @@ export function parsePDADefinition(input: string): { pda: PDADefinition | null; 
       acceptStates = line.replace('accept:', '').split(',').map(s => s.trim()).filter(Boolean);
     } else if (line.startsWith('δ(') || line.startsWith('d(')) {
       // Format: δ(q,a,A) = (p,BC) or δ(q,ε,A) = (p,ε)
-      const match = line.match(/[δd]\((\w+),\s*([^\s,)]+),\s*([^\s,)]+)\)\s*=\s*\((\w+),\s*([^)]*)\)/);
+      const match = line.match(/[δd]\(([A-Za-z0-9_]+),\s*([^,]+?),\s*([^\)]+?)\)\s*=\s*\(([A-Za-z0-9_]+),\s*([^)]*)\)/);
       if (match) {
         const [, from, inp, top, to, push] = match;
         const inputSym = inp === 'ε' || inp === 'eps' ? '' : inp;
@@ -84,6 +214,40 @@ export function parsePDADefinition(input: string): { pda: PDADefinition | null; 
 
   if (states.length === 0) errors.push('No states defined. Add a line: states: q0,q1,...');
   if (!startState) errors.push('No start state defined. Add: start: q0');
+  if (!initialStackSymbol) errors.push('No initial stack symbol defined. Add: initial_stack: Z');
+
+  const stateSet = new Set(states);
+  const stackSet = new Set(stackAlphabet.concat(initialStackSymbol));
+
+  if (startState && !stateSet.has(startState)) {
+    errors.push(`Start state "${startState}" is not listed in states.`);
+  }
+
+  acceptStates.forEach((state) => {
+    if (!stateSet.has(state)) {
+      errors.push(`Accept state "${state}" is not listed in states.`);
+    }
+  });
+
+  transitions.forEach((t, idx) => {
+    if (!stateSet.has(t.fromState)) {
+      errors.push(`Transition #${idx + 1}: unknown from-state "${t.fromState}".`);
+    }
+    if (!stateSet.has(t.toState)) {
+      errors.push(`Transition #${idx + 1}: unknown to-state "${t.toState}".`);
+    }
+    if (t.stackTop && !stackSet.has(t.stackTop)) {
+      errors.push(`Transition #${idx + 1}: stack symbol "${t.stackTop}" is not in stack alphabet.`);
+    }
+    for (const sym of t.pushSymbols) {
+      if (!stackSet.has(sym)) {
+        errors.push(`Transition #${idx + 1}: pushed symbol "${sym}" is not in stack alphabet.`);
+      }
+    }
+    if (t.inputSymbol && inputAlphabet.length > 0 && !inputAlphabet.includes(t.inputSymbol)) {
+      errors.push(`Transition #${idx + 1}: input symbol "${t.inputSymbol}" is not in input alphabet.`);
+    }
+  });
 
   if (errors.length > 0) return { pda: null, errors };
 
@@ -130,7 +294,7 @@ export function simulatePDA(
   pda: PDADefinition,
   input: string,
   mode: 'final-state' | 'empty-stack' = 'final-state',
-  maxSteps = 200
+  maxSteps = PDA_DEFAULT_MAX_STEPS
 ): PDATrace {
   const initialConfig: PDAConfiguration = {
     state: pda.startState,
@@ -154,11 +318,17 @@ export function simulatePDA(
 
   let acceptedPath: PDAStep[] | null = null;
   let allPaths: PDAStep[][] = [];
+  let sawLoop = false;
+  let sawStepLimit = false;
+  let sawDeadEnd = false;
 
   while (queue.length > 0 && allPaths.length < 20) {
     const { config, steps, visited } = queue.shift()!;
 
-    if (steps.length > maxSteps) continue;
+    if (steps.length > maxSteps) {
+      sawStepLimit = true;
+      continue;
+    }
 
     if (isAccepting(config, pda, mode)) {
       if (!acceptedPath) acceptedPath = steps;
@@ -168,6 +338,7 @@ export function simulatePDA(
 
     const applicable = getApplicableTransitions(config, pda);
     if (applicable.length === 0) {
+      sawDeadEnd = true;
       allPaths.push(steps);
       continue;
     }
@@ -175,7 +346,10 @@ export function simulatePDA(
     for (const t of applicable) {
       const newConfig = applyTransition(config, t);
       const key = JSON.stringify(newConfig);
-      if (visited.has(key)) continue;
+      if (visited.has(key)) {
+        sawLoop = true;
+        continue;
+      }
       const newVisited = new Set(visited);
       newVisited.add(key);
       const step: PDAStep = {
@@ -194,21 +368,233 @@ export function simulatePDA(
       steps: acceptedPath,
       accepted: true,
       acceptanceMode: mode,
-      message: `✓ Accepted by ${mode === 'final-state' ? 'final state' : 'empty stack'}.`,
+      message: mode === 'final-state' ? '✓ Accepted by final state.' : '✓ Accepted by empty stack.',
       allPaths,
+      stopReason: mode === 'final-state' ? 'accepted-final' : 'accepted-empty',
+      loopDetected: false,
+    };
+  }
+
+  const fallbackSteps = allPaths[0] || [{
+    stepNum: 0,
+    config: initialConfig,
+    appliedTransition: null,
+    explanation: 'No transitions applicable from initial configuration.',
+    isAccepting: false,
+  }];
+
+  if (sawStepLimit && !sawDeadEnd) {
+    return {
+      steps: fallbackSteps,
+      accepted: false,
+      acceptanceMode: mode,
+      message: `⚠ Step limit reached (${maxSteps}). Execution stopped safely.`,
+      allPaths,
+      stopReason: 'stepLimit',
+      loopDetected: false,
+    };
+  }
+
+  if (sawLoop && !sawDeadEnd) {
+    return {
+      steps: fallbackSteps,
+      accepted: false,
+      acceptanceMode: mode,
+      message: '⚠ Loop detected: repeated PDA configuration.',
+      allPaths,
+      stopReason: 'loop',
+      loopDetected: true,
+    };
+  }
+
+  if (sawDeadEnd) {
+    return {
+      steps: fallbackSteps,
+      accepted: false,
+      acceptanceMode: mode,
+      message: '✗ No valid transition → rejected.',
+      allPaths,
+      stopReason: 'rejected-no-transition',
+      loopDetected: sawLoop,
     };
   }
 
   return {
-    steps: allPaths[0] || [{
-      stepNum: 0, config: initialConfig, appliedTransition: null,
-      explanation: 'No transitions applicable from initial configuration.',
-      isAccepting: false,
-    }],
+    steps: fallbackSteps,
     accepted: false,
     acceptanceMode: mode,
-    message: `✗ Rejected. No accepting computation path found.`,
+    message: '✗ Rejected. No accepting computation path found.',
     allPaths,
+    stopReason: 'rejected',
+    loopDetected: sawLoop,
+  };
+}
+
+export async function simulatePDAAsync(
+  pda: PDADefinition,
+  input: string,
+  mode: 'final-state' | 'empty-stack' = 'final-state',
+  maxSteps = PDA_DEFAULT_MAX_STEPS,
+  onProgress: (steps: PDAStep[]) => void,
+  checkCancelled: () => boolean
+): Promise<PDATrace> {
+  const initialConfig: PDAConfiguration = {
+    state: pda.startState,
+    remainingInput: input,
+    stack: [pda.initialStackSymbol],
+  };
+
+  type Path = { config: PDAConfiguration; steps: PDAStep[]; visited: Set<string> };
+  const queue: Path[] = [{
+    config: initialConfig,
+    steps: [{
+      stepNum: 0,
+      config: initialConfig,
+      appliedTransition: null,
+      explanation: `Initial configuration. State: ${initialConfig.state}, Input: "${input}", Stack: [${initialConfig.stack.join(',')}]`,
+      isAccepting: isAccepting(initialConfig, pda, mode),
+    }],
+    visited: new Set([JSON.stringify(initialConfig)]),
+  }];
+
+  let acceptedPath: PDAStep[] | null = null;
+  const allPaths: PDAStep[][] = [];
+  let sawLoop = false;
+  let sawStepLimit = false;
+  let sawDeadEnd = false;
+  const CHUNK_SIZE = 120;
+
+  while (queue.length > 0 && allPaths.length < 20) {
+    if (checkCancelled()) {
+      const cancelledSteps = acceptedPath || allPaths[0] || queue[0]?.steps || [{
+        stepNum: 0,
+        config: initialConfig,
+        appliedTransition: null,
+        explanation: 'Execution stopped by user.',
+        isAccepting: false,
+      }];
+      return {
+        steps: cancelledSteps,
+        accepted: false,
+        acceptanceMode: mode,
+        message: '⏹ Execution stopped by user.',
+        allPaths,
+        stopReason: 'stopped',
+        loopDetected: false,
+      };
+    }
+
+    for (let c = 0; c < CHUNK_SIZE && queue.length > 0 && allPaths.length < 20; c++) {
+      const { config, steps, visited } = queue.shift()!;
+
+      if (steps.length > maxSteps) {
+        sawStepLimit = true;
+        continue;
+      }
+
+      if (isAccepting(config, pda, mode)) {
+        if (!acceptedPath) acceptedPath = steps;
+        allPaths.push(steps);
+        continue;
+      }
+
+      const applicable = getApplicableTransitions(config, pda);
+      if (applicable.length === 0) {
+        sawDeadEnd = true;
+        allPaths.push(steps);
+        continue;
+      }
+
+      for (const t of applicable) {
+        const newConfig = applyTransition(config, t);
+        const key = JSON.stringify(newConfig);
+        if (visited.has(key)) {
+          sawLoop = true;
+          continue;
+        }
+
+        const newVisited = new Set(visited);
+        newVisited.add(key);
+        const step: PDAStep = {
+          stepNum: steps.length,
+          config: newConfig,
+          appliedTransition: t,
+          explanation: buildExplanation(t, config, newConfig),
+          isAccepting: isAccepting(newConfig, pda, mode),
+        };
+        queue.push({ config: newConfig, steps: [...steps, step], visited: newVisited });
+      }
+    }
+
+    const progressSteps = acceptedPath || allPaths[0] || queue[0]?.steps;
+    if (progressSteps) onProgress(progressSteps);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  if (acceptedPath) {
+    return {
+      steps: acceptedPath,
+      accepted: true,
+      acceptanceMode: mode,
+      message: mode === 'final-state' ? '✓ Accepted by final state.' : '✓ Accepted by empty stack.',
+      allPaths,
+      stopReason: mode === 'final-state' ? 'accepted-final' : 'accepted-empty',
+      loopDetected: false,
+    };
+  }
+
+  const fallbackSteps = allPaths[0] || [{
+    stepNum: 0,
+    config: initialConfig,
+    appliedTransition: null,
+    explanation: 'No transitions applicable from initial configuration.',
+    isAccepting: false,
+  }];
+
+  if (sawStepLimit && !sawDeadEnd) {
+    return {
+      steps: fallbackSteps,
+      accepted: false,
+      acceptanceMode: mode,
+      message: `⚠ Step limit reached (${maxSteps}). Execution stopped safely.`,
+      allPaths,
+      stopReason: 'stepLimit',
+      loopDetected: false,
+    };
+  }
+
+  if (sawLoop && !sawDeadEnd) {
+    return {
+      steps: fallbackSteps,
+      accepted: false,
+      acceptanceMode: mode,
+      message: '⚠ Loop detected: repeated PDA configuration.',
+      allPaths,
+      stopReason: 'loop',
+      loopDetected: true,
+    };
+  }
+
+  if (sawDeadEnd) {
+    return {
+      steps: fallbackSteps,
+      accepted: false,
+      acceptanceMode: mode,
+      message: '✗ No valid transition → rejected.',
+      allPaths,
+      stopReason: 'rejected-no-transition',
+      loopDetected: sawLoop,
+    };
+  }
+
+  return {
+    steps: fallbackSteps,
+    accepted: false,
+    acceptanceMode: mode,
+    message: '✗ Rejected. No accepting computation path found.',
+    allPaths,
+    stopReason: 'rejected',
+    loopDetected: sawLoop,
   };
 }
 

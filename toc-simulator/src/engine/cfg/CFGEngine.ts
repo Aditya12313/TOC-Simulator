@@ -32,6 +32,68 @@ export interface GrammarSimplificationStep {
   after: CFGRule[];
 }
 
+export type CFGExampleCategory = 'basic' | 'structured' | 'expression' | 'ambiguous';
+
+export interface CFGExample {
+  name: string;
+  category: CFGExampleCategory;
+  description: string;
+  educationalNotes: string;
+  definition: string;
+  startSymbol: string;
+  input: string;
+}
+
+export const CFG_DEFAULT_MAX_STEPS = 120;
+
+export const CFG_EXAMPLES: CFGExample[] = [
+  {
+    name: 'a^n b^n',
+    category: 'basic',
+    description: 'Generates equal numbers of a followed by b.',
+    educationalNotes: 'Each expansion adds one a to the left and one b to the right, then eventually closes with epsilon.',
+    definition: 'S -> aSb | ε',
+    startSymbol: 'S',
+    input: 'aaabbb',
+  },
+  {
+    name: 'Balanced parentheses',
+    category: 'structured',
+    description: 'Builds correctly nested and concatenated parentheses.',
+    educationalNotes: 'Use S -> (S) for nesting, S -> SS for concatenation, and epsilon to stop.',
+    definition: 'S -> SS | (S) | ε',
+    startSymbol: 'S',
+    input: '(()())',
+  },
+  {
+    name: 'Arithmetic expressions',
+    category: 'expression',
+    description: 'Expression grammar with operator precedence style layers.',
+    educationalNotes: 'E handles + terms, T handles * factors, and F handles parentheses and identifiers.',
+    definition: "E -> E+T | T\nT -> T*F | F\nF -> (E) | id",
+    startSymbol: 'E',
+    input: 'id+id*id',
+  },
+  {
+    name: 'Palindromes',
+    category: 'structured',
+    description: 'Generates palindromes over alphabet {a, b}.',
+    educationalNotes: 'Grow from the center using aSa and bSb, with base cases a, b, and epsilon.',
+    definition: 'S -> aSa | bSb | a | b | ε',
+    startSymbol: 'S',
+    input: 'abba',
+  },
+  {
+    name: 'Simple ambiguous grammar',
+    category: 'ambiguous',
+    description: 'No precedence between + and * creates ambiguity.',
+    educationalNotes: 'The same string can be derived in multiple valid ways, producing different parse trees.',
+    definition: 'E -> E+E | E*E | id',
+    startSymbol: 'E',
+    input: 'id+id*id',
+  },
+];
+
 // Parse raw grammar text into structured Grammar
 export function parseGrammar(rulesText: string, startSymbol: string): { grammar: Grammar; errors: string[] } {
   const errors: string[] = [];
@@ -212,64 +274,59 @@ export function deriveRightmost(
   return { steps: [], success: false, message: `Cannot derive "${targetString}" using rightmost derivation.` };
 }
 
-// Build a parse tree from derivation steps (approximation)
+// Build a parse tree by replaying derivation steps.
+// This avoids unbounded recursion for left-recursive grammars.
 export function buildParseTree(grammar: Grammar, derivationSteps: DerivationStep[]): ParseTreeNode {
-  // Start from root
   const root: ParseTreeNode = {
     symbol: grammar.startSymbol,
     children: [],
     isTerminal: false,
   };
-  // Simplified: reconstruct tree from leftmost derivation steps
-  // We do a recursive simulation
-  const rulesMap = getRulesMap(grammar);
-  const targetSent = derivationSteps.length > 0 ? derivationSteps[derivationSteps.length - 1].sentential : grammar.startSymbol;
 
-  function expand(node: ParseTreeNode, available: string[]): number {
-    if (node.isTerminal) return 1;
-    const prods = rulesMap.get(node.symbol) || [];
-    // We use BFS-guided expansion
-    for (const prod of prods) {
-      const filtered = prod.filter(p => p !== '');
-      if (filtered.length === 0) {
-        // epsilon production
-        node.children = [{ symbol: 'ε', children: [], isTerminal: true }];
-        return 0;
-      }
-      // Check if beginning of available matches
-      let match = true;
-      let offset = 0;
-      for (const sym of filtered) {
-        if (grammar.nonTerminals.has(sym)) {
-          offset++; // placeholder - NT will consume some
-        } else {
-          if (available[offset] !== sym) { match = false; break; }
-          offset++;
-        }
-      }
-      if (match) {
-        let pos = 0;
-        for (const sym of filtered) {
-          const child: ParseTreeNode = {
-            symbol: sym,
-            children: [],
-            isTerminal: !grammar.nonTerminals.has(sym),
-          };
-          node.children.push(child);
-          if (!child.isTerminal) {
-            pos += expand(child, available.slice(pos));
-          } else {
-            pos++;
-          }
-        }
-        return pos;
-      }
+  // Frontier tracks current sentential leaves in left-to-right order.
+  let frontier: ParseTreeNode[] = [root];
+
+  for (const step of derivationSteps) {
+    const ruleMatch = step.rule.match(/^(.+?)\s*→\s*(.+)$/);
+    if (!ruleMatch) continue;
+
+    const lhs = ruleMatch[1].trim();
+    const rhsText = ruleMatch[2].trim();
+
+    let expandIndex = step.position;
+    if (
+      expandIndex < 0 ||
+      expandIndex >= frontier.length ||
+      frontier[expandIndex].symbol !== lhs
+    ) {
+      expandIndex = frontier.findIndex((node) => !node.isTerminal && node.symbol === lhs);
+      if (expandIndex === -1) continue;
     }
-    return 0;
+
+    const targetNode = frontier[expandIndex];
+    const isEpsilon = rhsText === 'ε' || rhsText === 'eps' || rhsText === '';
+
+    if (isEpsilon) {
+      targetNode.children = [{ symbol: 'ε', children: [], isTerminal: true }];
+      frontier = [...frontier.slice(0, expandIndex), ...frontier.slice(expandIndex + 1)];
+      continue;
+    }
+
+    const rhsTokens = tokenizeProduction(rhsText, grammar.nonTerminals).filter((token) => token !== '');
+    const childNodes = rhsTokens.map((token) => ({
+      symbol: token,
+      children: [],
+      isTerminal: !grammar.nonTerminals.has(token),
+    }));
+
+    targetNode.children = childNodes;
+    frontier = [
+      ...frontier.slice(0, expandIndex),
+      ...childNodes,
+      ...frontier.slice(expandIndex + 1),
+    ];
   }
 
-  const targetChars = targetSent.split('');
-  expand(root, targetChars);
   return root;
 }
 
@@ -646,398 +703,5 @@ export function simulatePumpingLemma(
   return { parts: { u, v, w }, pumped, explanation };
 }
 
-// ───────────────── NEW ADVANCED FEATURES ─────────────────
 
-// Random String Generator: produce a valid string with its derivation trace
-export function generateRandomString(
-  grammar: Grammar,
-  maxDepth = 8,
-  maxAttempts = 200
-): { string: string; derivation: DerivationStep[]; success: boolean } {
-  const rulesMap = getRulesMap(grammar);
-
-  function expand(tokens: string[], depth: number, steps: DerivationStep[]): string[] | null {
-    if (depth > maxDepth) return null;
-    const ntIdx = tokens.findIndex(t => grammar.nonTerminals.has(t));
-    if (ntIdx === -1) return tokens; // all terminals
-    const nt = tokens[ntIdx];
-    const prods = rulesMap.get(nt) || [];
-    if (prods.length === 0) return null;
-    // pick a random production (bias toward shorter ones to avoid blowup)
-    const sorted = [...prods].sort((a, b) => a.length - b.length);
-    const idx = Math.random() < 0.6 ? 0 : Math.floor(Math.random() * sorted.length);
-    const chosen = sorted[idx];
-    const filtered = chosen.filter(p => p !== '');
-    const newTokens = [...tokens.slice(0, ntIdx), ...filtered, ...tokens.slice(ntIdx + 1)];
-    const prodStr = chosen.join('') || 'ε';
-    steps.push({
-      sentential: newTokens.join('') || 'ε',
-      rule: `${nt} → ${prodStr}`,
-      position: ntIdx,
-      explanation: `Expand "${nt}" using ${nt} → ${prodStr}`,
-    });
-    return expand(newTokens, depth + 1, steps);
-  }
-
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const steps: DerivationStep[] = [];
-    const result = expand([grammar.startSymbol], 0, steps);
-    if (result !== null && !result.some(t => grammar.nonTerminals.has(t))) {
-      return { string: result.join(''), derivation: steps, success: true };
-    }
-  }
-  return { string: '', derivation: [], success: false };
-}
-
-// Full 2D CYK table (returns n×n cell array for grid visualization)
-export interface CYKCell {
-  nonterminals: string[];
-  row: number; // i
-  col: number; // j
-  substring: string;
-}
-
-export function cykFull(
-  grammar: Grammar,
-  input: string
-): { accepted: boolean; cells: CYKCell[][]; explanation: string[] } {
-  const explanation: string[] = [];
-  if (input === '' || input === 'ε') {
-    const hasEps = grammar.rules.some(r => r.lhs === grammar.startSymbol && r.rhs.includes(''));
-    return {
-      accepted: hasEps,
-      cells: [],
-      explanation: [`Checking if start symbol derives ε: ${hasEps}`],
-    };
-  }
-
-  const n = input.length;
-  const chars = input.split('');
-  const table: Set<string>[][] = Array.from({ length: n }, () =>
-    Array.from({ length: n }, () => new Set<string>())
-  );
-  const rulesMap = getRulesMap(grammar);
-
-  // Base: single characters
-  for (let i = 0; i < n; i++) {
-    for (const [nt, prods] of rulesMap) {
-      for (const prod of prods) {
-        if (prod.length === 1 && prod[0] === chars[i]) table[i][i].add(nt);
-      }
-    }
-    explanation.push(`[${i},${i}] "${chars[i]}": {${[...table[i][i]].join(', ')}}`);
-  }
-
-  // Fill longer spans
-  for (let len = 2; len <= n; len++) {
-    for (let i = 0; i <= n - len; i++) {
-      const j = i + len - 1;
-      for (let k = i; k < j; k++) {
-        for (const [nt, prods] of rulesMap) {
-          for (const prod of prods) {
-            if (prod.length === 2) {
-              const [B, C] = prod;
-              if (table[i][k].has(B) && table[k + 1][j].has(C)) table[i][j].add(nt);
-            }
-          }
-        }
-      }
-      if (table[i][j].size > 0)
-        explanation.push(`[${i},${j}] "${chars.slice(i, j + 1).join('')}": {${[...table[i][j]].join(', ')}}`);
-    }
-  }
-
-  const accepted = table[0][n - 1].has(grammar.startSymbol);
-  explanation.push(accepted ? `✓ ACCEPTED — "${grammar.startSymbol}" ∈ table[0][${n - 1}]` : `✗ REJECTED — "${grammar.startSymbol}" ∉ table[0][${n - 1}]`);
-
-  // Build cells matrix
-  const cells: CYKCell[][] = Array.from({ length: n }, (_, i) =>
-    Array.from({ length: n }, (_, j) => ({
-      nonterminals: [...table[i][j]],
-      row: i,
-      col: j,
-      substring: j >= i ? chars.slice(i, j + 1).join('') : '',
-    }))
-  );
-
-  return { accepted, cells, explanation };
-}
-
-// Multiple Derivation Paths: return several distinct leftmost derivation sequences
-export interface DerivationPath {
-  steps: DerivationStep[];
-  id: number;
-}
-
-export function getDerivationPaths(
-  grammar: Grammar,
-  targetString: string,
-  maxPaths = 5,
-  maxSteps = 80
-): DerivationPath[] {
-  const rulesMap = getRulesMap(grammar);
-  const results: DerivationPath[] = [];
-  const seenSequences = new Set<string>();
-
-  // DFS-style with backtracking to find multiple paths
-  function dfs(sent: string[], steps: DerivationStep[]): void {
-    if (results.length >= maxPaths) return;
-    if (steps.length > maxSteps) return;
-
-    const sentStr = sent.join('');
-    if (sentStr === targetString && !sent.some(s => grammar.nonTerminals.has(s))) {
-      const key = steps.map(s => s.rule).join('|');
-      if (!seenSequences.has(key)) {
-        seenSequences.add(key);
-        results.push({ steps: [...steps], id: results.length });
-      }
-      return;
-    }
-
-    // If it's already fully terminal but wrong
-    if (!sent.some(s => grammar.nonTerminals.has(s))) return;
-    // If it's longer than target, prune
-    const terminals = sent.filter(s => !grammar.nonTerminals.has(s));
-    if (terminals.join('').length > targetString.length) return;
-
-    const lmNT = sent.findIndex(s => grammar.nonTerminals.has(s));
-    if (lmNT === -1) return;
-    const nt = sent[lmNT];
-    const prods = rulesMap.get(nt) || [];
-
-    for (const prod of prods) {
-      const filtered = prod.filter(p => p !== '');
-      const newSent = [...sent.slice(0, lmNT), ...filtered, ...sent.slice(lmNT + 1)];
-      const prodStr = prod.join('') || 'ε';
-      const step: DerivationStep = {
-        sentential: newSent.join('') || 'ε',
-        rule: `${nt} → ${prodStr}`,
-        position: lmNT,
-        explanation: `Replace "${nt}" with "${prodStr}"`,
-      };
-      dfs(newSent, [...steps, step]);
-      if (results.length >= maxPaths) return;
-    }
-  }
-
-  dfs([grammar.startSymbol], []);
-  return results;
-}
-
-// Grammar Equivalence Heuristic: generate N random strings from each grammar and compare membership
-export interface GrammarEquivalenceResult {
-  sampleSize: number;
-  onlyInG1: string[];
-  onlyInG2: string[];
-  inBoth: string[];
-  likelyEquivalent: boolean;
-  explanation: string;
-}
-
-export function grammarEquivalenceHeuristic(
-  grammar1: Grammar,
-  grammar2: Grammar,
-  sampleSize = 30
-): GrammarEquivalenceResult {
-  const allStrings = new Set<string>();
-
-  // Generate from g1
-  for (let i = 0; i < sampleSize; i++) {
-    const { string: s, success } = generateRandomString(grammar1, 6, 30);
-    if (success && s) allStrings.add(s);
-  }
-  // Generate from g2
-  for (let i = 0; i < sampleSize; i++) {
-    const { string: s, success } = generateRandomString(grammar2, 6, 30);
-    if (success && s) allStrings.add(s);
-  }
-
-  const onlyInG1: string[] = [];
-  const onlyInG2: string[] = [];
-  const inBoth: string[] = [];
-
-  for (const s of allStrings) {
-    const { accepted: a1 } = cykMembership(grammar1, s);
-    const { accepted: a2 } = cykMembership(grammar2, s);
-    if (a1 && a2) inBoth.push(s);
-    else if (a1) onlyInG1.push(s);
-    else if (a2) onlyInG2.push(s);
-  }
-
-  const likelyEquivalent = onlyInG1.length === 0 && onlyInG2.length === 0;
-  const explanation = likelyEquivalent
-    ? `Tested ${allStrings.size} strings. No differences found — grammars appear equivalent (heuristic, not conclusive).`
-    : `Found ${onlyInG1.length} strings only in G1 and ${onlyInG2.length} strings only in G2. Grammars are NOT equivalent.`;
-
-  return { sampleSize: allStrings.size, onlyInG1, onlyInG2, inBoth, likelyEquivalent, explanation };
-}
-
-// Pumping Lemma Proof Steps for CFLs
-// Returns a structured sequence of proof steps for interactive guidance
-export interface PumpingProofState {
-  s: string;         // The string being pumped
-  p: number;         // Pumping length
-  u: string; v: string; x: string; y: string; w: string; // uvxyw decomposition
-  pumpedStrings: Record<number, string>;
-}
-
-export interface PumpingLemmaProofStep {
-  id: string;
-  title: string;
-  description: string;
-  hint: string;
-  infoContent?: string;
-  isInfo?: boolean;
-  validate?: (input: string, state: Partial<PumpingProofState>) => {
-    valid: boolean; message: string; explanation?: string;
-    update?: Partial<PumpingProofState>;
-  };
-  inputPlaceholder?: string;
-  inputType?: 'text' | 'number';
-}
-
-export function buildPumpingLemmaProofSteps(
-  grammar: Grammar,
-  defaultString = 'aabb',
-  defaultP = 3
-): PumpingLemmaProofStep[] {
-  return [
-    {
-      id: 'assume_cfl',
-      title: 'Assume L is a CFL',
-      isInfo: true,
-      description: 'We start by assuming the language is context-free, leading to a contradiction.',
-      hint: 'The pumping lemma is a proof by contradiction.',
-      infoContent: `Assume L is a CFL. By the Pumping Lemma for CFLs, there exists a pumping length p ≥ 1 such that every string s ∈ L with |s| ≥ p can be written as s = uvxyw where:\n  1. |vy| ≥ 1\n  2. |vxy| ≤ p\n  3. For all i ≥ 0, uv^i xy^i w ∈ L`,
-    },
-    {
-      id: 'choose_string',
-      title: 'Choose your string s',
-      description: 'Enter a string from the language that you want to pump. It must be long enough (|s| ≥ p).',
-      hint: `For the grammar "${grammar.rules.map(r => `${r.lhs} → ${r.rhs.join('|')}`).join(', ')}", try a string like "aabb" or make it longer, e.g. "aaabbb".`,
-      inputPlaceholder: defaultString,
-      inputType: 'text',
-      validate: (input, _state) => {
-        if (!input || input.length === 0) return { valid: false, message: 'Enter a non-empty string.' };
-        const { success } = deriveLeftmost(grammar, input, 80);
-        if (!success) return {
-          valid: false, message: `"${input}" is not in the language L(G). Choose a string that the grammar generates.`,
-          explanation: `Run the derivation or membership tab to check if a string is in L(G).`,
-        };
-        return { valid: true, message: `Good — "${input}" ∈ L(G). Now choose a pumping length.`, update: { s: input } };
-      },
-    },
-    {
-      id: 'choose_p',
-      title: 'Choose pumping length p',
-      description: 'Choose the pumping length p (must be ≤ length of your string). This represents the adversary\'s choice.',
-      hint: 'A common choice is p = half the length of your string. The adversary (the CFL pumping lemma) will pick the decomposition.',
-      inputPlaceholder: String(defaultP),
-      inputType: 'number',
-      validate: (input, state) => {
-        const p = parseInt(input, 10);
-        if (isNaN(p) || p < 1) return { valid: false, message: 'p must be a positive integer.' };
-        const s = state.s ?? '';
-        if (p > s.length) return { valid: false, message: `p=${p} must be ≤ |s|=${s.length}.` };
-        return { valid: true, message: `p = ${p} accepted. Now decompose s = uvxyw.`, update: { p } };
-      },
-    },
-    {
-      id: 'decompose',
-      title: 'Decompose s = uvxyw',
-      description: 'The adversary picks a decomposition. Enter the 5 parts separated by commas: u,v,x,y,w (where v,y are the pumped parts, vxy ≤ p, and |vy| ≥ 1).',
-      hint: 'The adversary chooses the worst decomposition for you. Try to show that pumping breaks membership for ALL valid decompositions.',
-      inputPlaceholder: 'ε,a,ε,b,ε  (use ε for empty)',
-      inputType: 'text',
-      validate: (input, state) => {
-        const parts = input.split(',').map(p => p.trim().replace(/^ε$/, ''));
-        if (parts.length !== 5) return { valid: false, message: 'Provide exactly 5 parts: u, v, x, y, w separated by commas.' };
-        const [u, v, x, y, w] = parts;
-        const s = state.s ?? '';
-        const p = state.p ?? 1;
-        if (u + v + x + y + w !== s) return {
-          valid: false,
-          message: `u+v+x+y+w = "${u+v+x+y+w}" ≠ s = "${s}".`,
-          explanation: 'The five parts must concatenate to your original string.',
-        };
-        if (v.length + y.length < 1) return { valid: false, message: '|vy| must be ≥ 1.' };
-        if (v.length + x.length + y.length > p) return {
-          valid: false, message: `|vxy| = ${v.length+x.length+y.length} > p = ${p}.`,
-        };
-        const pumped: Record<number, string> = {};
-        for (const i of [0, 1, 2, 3]) pumped[i] = u + v.repeat(i) + x + y.repeat(i) + w;
-        return { valid: true, message: 'Decomposition valid! Now pump and check membership.', update: { u, v, x, y, w, pumpedStrings: pumped } };
-      },
-    },
-    {
-      id: 'pump_check',
-      title: 'Find a pump value i that fails',
-      description: 'Enter a value of i (0, 2, 3, …). The pumped string uv^i xy^i w should NOT be in the language to prove the contradiction.',
-      hint: 'Try i=0 (removes v and y) or i=2 (adds extra copies). One of these usually breaks the language condition.',
-      inputPlaceholder: '0',
-      inputType: 'number',
-      validate: (input, state) => {
-        const i = parseInt(input, 10);
-        if (isNaN(i) || i < 0) return { valid: false, message: 'i must be a non-negative integer.' };
-        const { u='', v='', x='', y='', w='' } = state;
-        const pumped = u + v.repeat(i) + x + y.repeat(i) + w;
-        const { success } = deriveLeftmost(grammar, pumped, 80);
-        if (success) return {
-          valid: false,
-          message: `uv^${i}xy^${i}w = "${pumped}" is still in L(G). Try a different i.`,
-          explanation: 'You need to find an i where the pumped string leaves the language.',
-        };
-        return {
-          valid: true,
-          message: `✓ Contradiction! uv^${i}xy^${i}w = "${pumped}" ∉ L(G), but the pumping lemma says it should be!`,
-        };
-      },
-    },
-    {
-      id: 'conclude',
-      title: 'State the conclusion',
-      description: 'What does this contradiction tell us?',
-      hint: 'We assumed L is a CFL, but the pumping lemma was violated → contradiction → L is not a CFL.',
-      isInfo: true,
-      infoContent: 'Since we found a string s ∈ L with |s| ≥ p, and for the adversary\'s decomposition s = uvxyw, pumping produces a string NOT in L — this contradicts the pumping lemma. Therefore, L is NOT a context-free language. □',
-    },
-  ];
-}
-
-// Inherent ambiguity examples and explanations
-export interface AmbiguityExample {
-  name: string;
-  grammar: string;
-  startSymbol: string;
-  testString: string;
-  explanation: string;
-  isInherentlyAmbiguous: boolean;
-}
-
-export const AMBIGUITY_EXAMPLES: AmbiguityExample[] = [
-  {
-    name: 'Classic Ambiguous (Arithmetic)',
-    grammar: 'E -> E+E | E*E | a',
-    startSymbol: 'E',
-    testString: 'a+a*a',
-    explanation: 'This grammar is ambiguous: "a+a*a" has two parse trees (add first, or multiply first). But an unambiguous version exists (with precedence rules), so this is NOT inherently ambiguous.',
-    isInherentlyAmbiguous: false,
-  },
-  {
-    name: 'Inherently Ambiguous Language',
-    grammar: 'S -> AB | DC\nA -> aA | a\nB -> bBc | bc\nD -> aDb | ab\nC -> cC | c',
-    startSymbol: 'S',
-    testString: 'abc',
-    explanation: 'L = {aⁿbⁿcᵐ | n,m≥1} ∪ {aⁿbᵐcᵐ | n,m≥1} is inherently ambiguous. Strings of the form aⁿbⁿcⁿ belong to both sublanguages and MUST have at least two parse trees in any grammar for L. No unambiguous grammar exists.',
-    isInherentlyAmbiguous: true,
-  },
-  {
-    name: 'Balanced Parentheses (Unambiguous)',
-    grammar: 'S -> SS | (S) | ε',
-    startSymbol: 'S',
-    testString: '(())',
-    explanation: 'This grammar for balanced parentheses IS ambiguous (multiple parse trees for some strings), but an unambiguous version can be written. The language itself is not inherently ambiguous.',
-    isInherentlyAmbiguous: false,
-  },
-];
 

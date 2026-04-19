@@ -11,8 +11,11 @@ export interface HistorySnapshot<T> {
 export class HistoryManager<T> {
   private snapshots: HistorySnapshot<T>[] = [];
   private cursorPos = -1;
+  private readonly maxSize: number;
 
-  constructor(private readonly maxSize = 2000) {}
+  constructor(maxSize = 2000) {
+    this.maxSize = maxSize;
+  }
 
   /** Push a new snapshot */
   push(data: T, label: string): void {

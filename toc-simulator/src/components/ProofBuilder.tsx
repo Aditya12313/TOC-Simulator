@@ -208,7 +208,7 @@ export default function ProofBuilder({
                       placeholder={step.inputPlaceholder ?? 'Your answer…'}
                       accentColor={accentColor}
                       onSubmit={(val) => submitStep(step, val)}
-                      inputType={step.inputType ?? 'text'}
+                      inputType={step.inputType === 'number' ? 'number' : 'text'}
                     />
                   )}
 
