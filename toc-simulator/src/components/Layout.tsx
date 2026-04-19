@@ -9,18 +9,6 @@ const MODULES = [
   { path: '/tm',  label: 'TM',  color: 'tm'  },
 ];
 
-const colorMap: Record<string, string> = {
-  cfg: 'bg-green-100 text-green-700 border-green-300',
-  pda: 'bg-orange-100 text-orange-700 border-orange-300',
-  tm:  'bg-rose-100 text-rose-700 border-rose-300',
-};
-
-const darkColorMap: Record<string, string> = {
-  cfg: 'bg-green-900/40 text-green-400 border-green-700',
-  pda: 'bg-orange-900/40 text-orange-400 border-orange-700',
-  tm:  'bg-rose-900/40 text-rose-400 border-rose-800',
-};
-
 export default function Layout() {
   const navigate  = useNavigate();
   const location  = useLocation();
@@ -54,13 +42,15 @@ export default function Layout() {
 
           {/* Logo */}
           <button onClick={() => navigate('/')} className="flex items-center gap-2 group shrink-0">
-            <div className="w-7 h-7 rounded-md flex items-center justify-center"
-              style={{ background: 'var(--ink)' }}>
+            <div
+              className="w-7 h-7 rounded-md flex items-center justify-center border"
+              style={{ background: 'var(--bg-2)', color: 'var(--ink)', borderColor: 'var(--border)' }}
+            >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <rect x="1" y="1" width="5" height="5" rx="1" fill="var(--bg)"/>
-                <rect x="8" y="1" width="5" height="5" rx="1" fill="var(--bg)" opacity="0.7"/>
-                <rect x="1" y="8" width="5" height="5" rx="1" fill="var(--bg)" opacity="0.7"/>
-                <rect x="8" y="8" width="5" height="5" rx="1" fill="var(--bg)" opacity="0.35"/>
+                <rect x="1" y="1" width="5" height="5" rx="1" fill="currentColor"/>
+                <rect x="8" y="1" width="5" height="5" rx="1" fill="currentColor" opacity="0.7"/>
+                <rect x="1" y="8" width="5" height="5" rx="1" fill="currentColor" opacity="0.7"/>
+                <rect x="8" y="8" width="5" height="5" rx="1" fill="currentColor" opacity="0.35"/>
               </svg>
             </div>
             <span className="font-bold text-sm group-hover:opacity-70 transition-opacity" style={{ color: 'var(--ink)' }}>
@@ -74,11 +64,27 @@ export default function Layout() {
           <nav className="flex items-center gap-1.5">
             {MODULES.map(m => {
               const active = location.pathname.startsWith(m.path);
-              const activeClass = dark ? darkColorMap[m.color] : colorMap[m.color];
+              const activeStyle = active
+                ? {
+                    background: `var(--${m.color}-bg)`,
+                    color: `var(--${m.color})`,
+                    borderColor: `var(--${m.color}-border)`,
+                  }
+                : {
+                    background: 'var(--bg-2)',
+                    color: 'var(--ink-3)',
+                    borderColor: 'var(--border)',
+                  };
               return (
-                <motion.button key={m.path} onClick={() => navigate(m.path)}
-                  whileHover={{ y: -1 }} whileTap={{ scale: 0.95 }}
-                  className={`pill transition-all duration-150 ${active ? activeClass : 'pill-gray hover:border-[var(--ink-3)]'}`}>
+                <motion.button
+                  key={m.path}
+                  onClick={() => navigate(m.path)}
+                  whileHover={{ scale: 1.015 }}
+                  whileTap={{ scale: 0.985 }}
+                  transition={{ duration: 0.16, ease: 'easeOut' }}
+                  className="pill"
+                  style={activeStyle}
+                >
                   {m.label}
                 </motion.button>
               );
@@ -95,7 +101,8 @@ export default function Layout() {
           {/* Dark / Light toggle */}
           <motion.button
             onClick={() => setDark(d => !d)}
-            whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.98 }}
             className="ml-auto shrink-0 w-8 h-8 rounded-lg border border-[var(--border)] flex items-center justify-center transition-colors hover:border-[var(--ink-3)]"
             style={{ background: 'var(--bg-2)', marginLeft: currentModule ? 8 : 'auto' }}
             title={dark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
@@ -103,7 +110,7 @@ export default function Layout() {
             <motion.div
               initial={false}
               animate={{ rotate: dark ? 180 : 0, opacity: 1 }}
-              transition={{ duration: 0.3, ease: 'easeInOut' }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
             >
               {dark
                 ? <Sun  size={14} style={{ color: 'var(--ink-3)' }} />

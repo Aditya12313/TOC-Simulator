@@ -95,7 +95,7 @@ export default function ConfigGraphView({
               {edge.label && (
                 <text x={mx} y={my - 4}
                   textAnchor="middle"
-                  fontSize="8" fontFamily="JetBrains Mono"
+                  fontSize="8" fontFamily="IBM Plex Mono"
                   fill={isAcceptingEdge ? '#16a34a' : 'var(--ink-3)'}
                   style={{ pointerEvents: 'none' }}>
                   {edge.label.length > 14 ? edge.label.slice(0, 12) + '…' : edge.label}
@@ -166,7 +166,7 @@ export default function ConfigGraphView({
               {/* Node label */}
               <text x={node.x} y={node.y + 4}
                 textAnchor="middle"
-                fontSize="8" fontFamily="JetBrains Mono" fontWeight="700"
+                fontSize="8" fontFamily="IBM Plex Mono" fontWeight="700"
                 fill={colors.text}
                 style={{ pointerEvents: 'none' }}>
                 {node.label.length > 8 ? node.label.slice(0, 7) + '…' : node.label}

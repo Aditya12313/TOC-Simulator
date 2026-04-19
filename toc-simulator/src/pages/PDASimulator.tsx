@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
-  RotateCcw,
   BookOpen,
   Cpu,
   Search,
@@ -12,11 +11,8 @@ import {
   Languages,
   GitBranch,
   AlertTriangle,
-  SkipBack,
-  SkipForward,
-  ChevronLeft,
-  ChevronRight,
 } from 'lucide-react';
+import ExecutionControlBar from '../components/ExecutionControlBar';
 import {
   parsePDADefinition,
   simulatePDAAsync,
@@ -28,6 +24,7 @@ import {
 } from '../engine/pda/PDAEngine';
 
 type PDAGroupId = 'basic' | 'recognizers' | 'patterns';
+type PDASection = 'simulation' | 'membership' | 'execution-trace';
 
 const PDA_GROUPS: Array<{ id: PDAGroupId; title: string; icon: typeof Layers; names: string[] }> = [
   {
@@ -61,6 +58,27 @@ const SPEEDS = [
   { label: '1x', value: 2 },
   { label: '2x', value: 3 },
 ];
+
+const PDA_SECTIONS: Array<{ id: PDASection; label: string }> = [
+  { id: 'simulation', label: 'Simulation' },
+  { id: 'membership', label: 'Membership' },
+  { id: 'execution-trace', label: 'Execution Trace' },
+];
+
+function getMembershipReason(result: { ok: boolean; stopReason: PDAStopReason } | null): string {
+  if (!result) return 'Run the simulator to evaluate membership.';
+  if (result.stopReason === 'accepted-final') return 'Accepted by final state.';
+  if (result.stopReason === 'accepted-empty') return 'Accepted by empty stack.';
+  if (result.stopReason === 'rejected-no-transition') return 'Rejected due to no valid transition.';
+  if (result.stopReason === 'rejected-input-not-consumed') return 'Rejected because input was not fully consumed.';
+  if (result.stopReason === 'rejected-stack-mismatch') return 'Rejected due to stack mismatch.';
+  if (result.stopReason === 'rejected-invalid-order') return 'Rejected due to invalid symbol order.';
+  if (result.stopReason === 'rejected') return 'Rejected because no accepting computation path exists.';
+  if (result.stopReason === 'loop') return 'Halted after loop detection.';
+  if (result.stopReason === 'stepLimit') return 'Halted due to step limit.';
+  if (result.stopReason === 'stopped') return 'Execution stopped before completion.';
+  return 'Computation halted.';
+}
 
 function getStackAction(step: PDAStep | null, prevStep: PDAStep | null): string {
   if (!step) return 'None';
@@ -129,6 +147,7 @@ function StackDisplay({ step, prevStep, animate }: { step: PDAStep; prevStep: PD
 }
 
 export default function PDASimulator() {
+  const [activeSection, setActiveSection] = useState<PDASection>('simulation');
   const [activeExample, setActiveExample] = useState<PDAExample | null>(PDA_EXAMPLES[0]);
   const [exampleSearch, setExampleSearch] = useState('');
   const [collapsedGroups, setCollapsedGroups] = useState<Record<PDAGroupId, boolean>>(DEFAULT_GROUPS);
@@ -310,7 +329,11 @@ export default function PDASimulator() {
       ? 'Idle'
       : result?.ok
         ? 'Accepted'
-        : result?.stopReason === 'rejected-no-transition' || result?.stopReason === 'rejected'
+        : result?.stopReason === 'rejected-no-transition'
+          || result?.stopReason === 'rejected-input-not-consumed'
+          || result?.stopReason === 'rejected-stack-mismatch'
+          || result?.stopReason === 'rejected-invalid-order'
+          || result?.stopReason === 'rejected'
           ? 'Rejected'
           : 'Halted';
 
@@ -321,8 +344,6 @@ export default function PDASimulator() {
       : executionStatus === 'Rejected'
         ? 'pill-tm'
         : 'pill-gray';
-
-  const progress = steps.length > 0 ? ((curStep + 1) / steps.length) * 100 : 0;
 
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 48px)' }}>
@@ -483,8 +504,26 @@ export default function PDASimulator() {
         </div>
 
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-auto p-5 dot-grid">
+          <div className="flex-1 overflow-auto p-5 pb-28 dot-grid">
             <div className="space-y-4">
+              <div className="card p-2">
+                <div className="flex gap-2 flex-wrap">
+                  {PDA_SECTIONS.map((section) => (
+                    <button
+                      key={section.id}
+                      onClick={() => setActiveSection(section.id)}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                        activeSection === section.id
+                          ? 'bg-[var(--pda-bg)] border-[var(--pda-border)] text-[var(--pda)]'
+                          : 'bg-[var(--surface)] border-[var(--border)] text-[var(--ink-3)] hover:text-[var(--ink)]'
+                      }`}
+                    >
+                      {section.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="card p-4">
                 <div className="flex items-center justify-between mb-3">
                   <p className="section-label mb-0">Execution Status</p>
@@ -517,7 +556,7 @@ export default function PDASimulator() {
                 </motion.div>
               )}
 
-              {simulated && cur ? (
+              {activeSection === 'simulation' && simulated && cur ? (
                 <>
                   <div className="card p-5">
                     <div className="grid grid-cols-3 gap-3 items-start">
@@ -562,60 +601,127 @@ export default function PDASimulator() {
                     </div>
                   )}
                 </>
-              ) : (
+              ) : activeSection === 'simulation' ? (
                 <div className="card flex flex-col items-center justify-center h-56 text-center text-[var(--ink-3)]">
                   <Cpu size={40} className="mb-3 opacity-20" />
                   <p className="text-sm">Choose a PDA example and run to visualize stack computation.</p>
                   <p className="text-xs mt-1 font-mono opacity-60">loop detection active | step limit {PDA_DEFAULT_MAX_STEPS}</p>
                 </div>
+              ) : null}
+
+              {activeSection === 'membership' && (
+                <div className="space-y-3">
+                  {simulated ? (
+                    <>
+                      <div className={result?.ok ? 'result-accept' : result?.stopReason === 'loop' || result?.stopReason === 'stepLimit' ? 'result-warn' : 'result-reject'}>
+                        {result?.ok ? 'Accepted' : 'Rejected'}
+                      </div>
+                      <div className="card p-4">
+                        <p className="section-label mb-1">Membership Result</p>
+                        <p className="text-sm text-[var(--ink)]">Input string: <span className="font-mono">{inputStr || 'eps'}</span></p>
+                        <p className="text-xs text-[var(--ink-3)] mt-1 leading-relaxed">{getMembershipReason(result)}</p>
+                        <p className="text-xs text-[var(--ink-3)] mt-1 leading-relaxed">{result?.msg}</p>
+                      </div>
+                      {cur && (
+                        <div className="card p-4">
+                          <p className="section-label mb-1">Final Configuration</p>
+                          <p className="text-xs font-mono text-[var(--ink-2)]">State: {cur.config.state}</p>
+                          <p className="text-xs font-mono text-[var(--ink-2)]">Input remaining: {cur.config.remainingInput || 'eps'}</p>
+                          <p className="text-xs font-mono text-[var(--ink-2)]">Stack: [{cur.config.stack.join(',') || 'empty'}]</p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="card flex flex-col items-center justify-center h-52 text-center text-[var(--ink-3)]">
+                      <p className="text-sm">Run the simulator to check membership for the current input string.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeSection === 'execution-trace' && (
+                <div className="card p-4">
+                  <p className="section-label mb-2">Execution Trace</p>
+                  {simulated && steps.length > 0 ? (
+                    <div className="overflow-y-auto max-h-[430px]">
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0" style={{ background: 'var(--bg-2)' }}>
+                          <tr className="border-b border-[var(--border)]">
+                            {['Step', 'State', 'Input Remaining', 'Stack', 'Action'].map((h) => (
+                              <th key={h} className="text-left py-1.5 px-2 font-mono text-[10px] text-[var(--ink-3)]">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {steps.map((s, i) => (
+                            <tr
+                              key={`trace-center-${i}`}
+                              onClick={() => setCurStep(i)}
+                              className="border-b border-[var(--border)] cursor-pointer transition-colors"
+                              style={curStep === i ? { background: 'var(--pda-bg)' } : {}}
+                            >
+                              <td className="py-1.5 px-2 font-mono text-[var(--ink-3)]">{s.stepNum}</td>
+                              <td className="py-1.5 px-2 font-mono font-bold text-[var(--pda)]">{s.config.state}</td>
+                              <td className="py-1.5 px-2 font-mono text-[var(--ink-2)]">{s.config.remainingInput || 'eps'}</td>
+                              <td className="py-1.5 px-2 font-mono text-[var(--ink-3)]">[{s.config.stack.join(',') || 'empty'}]</td>
+                              <td className="py-1.5 px-2 font-mono text-[10px] text-[var(--ink-3)] max-w-44 truncate">{s.explanation}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="h-44 flex items-center justify-center text-center text-[var(--ink-3)] text-sm">
+                      Run the simulator to generate the execution trace.
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
 
-          <div className="border-t border-[var(--border)] px-4 py-2.5" style={{ background: 'var(--surface)' }}>
-            <div className="flex items-center gap-2 mb-2">
-              <button onClick={() => void handleRun()} disabled={isSimulating} className="btn-pda btn-sm px-4">
-                {isFastMode ? 'Fast Run' : 'Run'}
-              </button>
-              <button onClick={() => void handleStep()} disabled={isFastMode || isSimulating} className="btn-outline btn-sm">Step</button>
-              <button onClick={handlePause} disabled={!isRunning && !isSimulating} className="btn-outline btn-sm">Pause</button>
-              <button onClick={resetTimeline} disabled={!simulated && !isSimulating} className="btn-outline btn-sm"><RotateCcw size={12} /> Reset</button>
-
-              <div className="ml-auto flex items-center gap-1">
-                <button onClick={() => setCurStep(0)} disabled={steps.length === 0 || curStep <= 0} className="btn-outline btn-sm"><SkipBack size={12} /></button>
-                <button onClick={() => setCurStep((p) => Math.max(0, p - 1))} disabled={steps.length === 0 || curStep <= 0} className="btn-outline btn-sm"><ChevronLeft size={12} /></button>
-                <button onClick={() => setCurStep((p) => Math.min(steps.length - 1, p + 1))} disabled={steps.length === 0 || curStep >= steps.length - 1} className="btn-outline btn-sm"><ChevronRight size={12} /></button>
-                <button onClick={() => setCurStep(Math.max(steps.length - 1, 0))} disabled={steps.length === 0 || curStep >= steps.length - 1} className="btn-outline btn-sm"><SkipForward size={12} /></button>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <span className="font-mono text-xs text-[var(--ink-3)] shrink-0 w-20">{steps.length > 0 ? `${curStep + 1} / ${steps.length}` : '- / -'}</span>
-              <div className="flex-1 h-1.5 rounded-full bg-[var(--bg-2)] overflow-hidden">
-                <motion.div className="h-full rounded-full" style={{ background: 'var(--pda)' }} animate={{ width: `${progress}%` }} transition={{ duration: 0.15 }} />
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                {SPEEDS.map((s) => (
-                  <button
-                    key={s.value}
-                    onClick={() => {
-                      setSpeed(s.value);
-                      stopAuto();
-                    }}
-                    className={`px-2 py-1 text-xs font-mono rounded-md border transition-all duration-100 ${
-                      speed === s.value ? 'bg-[var(--ink)] text-white border-[var(--ink)]' : 'border-[var(--border)] text-[var(--ink-3)] hover:border-[var(--ink-3)]'
-                    }`}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
         </div>
 
-        {simulated && steps.length > 0 && (
-          <div className="w-80 border-l border-[var(--border)] flex flex-col shrink-0 overflow-hidden" style={{ background: 'var(--surface)' }}>
+        <div className="w-80 border-l border-[var(--border)] flex flex-col shrink-0 overflow-hidden" style={{ background: 'var(--surface)' }}>
+          <div className="p-3 border-b border-[var(--border)]">
+            <p className="section-label">
+              {activeSection === 'simulation' ? 'Execution Details' : activeSection === 'membership' ? 'Membership Details' : 'Trace Details'}
+            </p>
+          </div>
+
+          {activeSection === 'simulation' && simulated && cur ? (
+            <div className="p-3 space-y-2 text-xs text-[var(--ink-3)]">
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-2)] p-3">
+                <p className="section-label mb-1">Current step</p>
+                <p>Step {cur.stepNum}</p>
+                <p className="font-mono text-[var(--ink)]">State: {cur.config.state}</p>
+                <p className="font-mono">Input remaining: {cur.config.remainingInput || 'eps'}</p>
+              </div>
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-2)] p-3">
+                <p className="section-label mb-1">Explanation</p>
+                <p className="leading-relaxed">{cur.explanation}</p>
+              </div>
+            </div>
+          ) : null}
+
+          {activeSection === 'membership' && simulated ? (
+            <div className="p-3 space-y-2 text-xs text-[var(--ink-3)]">
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-2)] p-3">
+                <p className="section-label mb-1">Result</p>
+                <p className={result?.ok ? 'text-[var(--cfg)] font-semibold' : 'text-[var(--tm)] font-semibold'}>
+                  {result?.ok ? 'Accepted' : 'Rejected'}
+                </p>
+                <p className="mt-1">{getMembershipReason(result)}</p>
+              </div>
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-2)] p-3">
+                <p className="section-label mb-1">Input string</p>
+                <p className="font-mono text-[var(--ink)]">{inputStr || 'eps'}</p>
+              </div>
+            </div>
+          ) : null}
+
+          {activeSection === 'execution-trace' && simulated && steps.length > 0 ? (
+            <>
             <div className="p-3 border-b border-[var(--border)]">
               <p className="section-label">Execution Trace</p>
             </div>
@@ -647,9 +753,41 @@ export default function PDASimulator() {
                 </tbody>
               </table>
             </div>
-          </div>
-        )}
+            </>
+          ) : null}
+
+          {(!simulated || (activeSection === 'execution-trace' && steps.length === 0)) && (
+            <div className="flex-1 flex items-center justify-center text-center px-5 text-[var(--ink-3)] text-sm">
+              {activeSection === 'membership'
+                ? 'Run the simulator to view membership details.'
+                : activeSection === 'execution-trace'
+                  ? 'Run the simulator to populate the execution trace.'
+                  : 'Run the simulator to view execution details.'}
+            </div>
+          )}
+        </div>
       </div>
+
+      <ExecutionControlBar
+        accent="pda"
+        status={executionStatus}
+        runLabel={isFastMode ? 'Fast Run' : 'Run'}
+        stepIndicator={steps.length > 0 ? `${curStep + 1} / ${steps.length}` : '- / -'}
+        speed={speed}
+        speeds={SPEEDS}
+        onRun={() => void handleRun()}
+        onStep={() => void handleStep()}
+        onPause={handlePause}
+        onReset={resetTimeline}
+        onSpeedChange={(nextSpeed) => {
+          setSpeed(nextSpeed);
+          stopAuto();
+        }}
+        runDisabled={isRunning || isSimulating}
+        stepDisabled={isRunning || isFastMode || isSimulating}
+        pauseDisabled={!isRunning && !isSimulating}
+        resetDisabled={!simulated && !isSimulating}
+      />
     </div>
   );
 }

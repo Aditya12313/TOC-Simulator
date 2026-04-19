@@ -42,12 +42,12 @@ export default function PlaybackBar({
 
       {/* Controls */}
       <div className="flex items-center gap-1">
-        <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.93 }}
+        <motion.button whileHover={{ scale: 1.015 }} whileTap={{ scale: 0.985 }} transition={{ duration: 0.16, ease: 'easeOut' }}
           onClick={onFirst} disabled={atStart || totalSteps === 0}
           className="btn-outline btn-sm" title="Go to start">
           <SkipBack size={12} />
         </motion.button>
-        <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.93 }}
+        <motion.button whileHover={{ scale: 1.015 }} whileTap={{ scale: 0.985 }} transition={{ duration: 0.16, ease: 'easeOut' }}
           onClick={onPrev} disabled={atStart || totalSteps === 0}
           className="btn-outline btn-sm" title="Previous step">
           <ChevronLeft size={12} /> Prev
@@ -55,7 +55,7 @@ export default function PlaybackBar({
 
         {/* Play/Pause — accent colored */}
         <motion.button
-          whileHover={{ y: -1 }} whileTap={{ scale: 0.93 }}
+          whileHover={{ scale: 1.015 }} whileTap={{ scale: 0.985 }} transition={{ duration: 0.16, ease: 'easeOut' }}
           onClick={onTogglePlay} disabled={totalSteps === 0}
           className={`${accentClass} btn-sm px-4`}
           title={isRunning ? 'Pause' : 'Auto-run'}
@@ -63,12 +63,12 @@ export default function PlaybackBar({
           {isRunning ? <><Pause size={12} /> Pause</> : <><Play size={12} /> Run</>}
         </motion.button>
 
-        <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.93 }}
+        <motion.button whileHover={{ scale: 1.015 }} whileTap={{ scale: 0.985 }} transition={{ duration: 0.16, ease: 'easeOut' }}
           onClick={onNext} disabled={atEnd || totalSteps === 0}
           className="btn-outline btn-sm" title="Next step">
           Next <ChevronRight size={12} />
         </motion.button>
-        <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.93 }}
+        <motion.button whileHover={{ scale: 1.015 }} whileTap={{ scale: 0.985 }} transition={{ duration: 0.16, ease: 'easeOut' }}
           onClick={onLast} disabled={atEnd || totalSteps === 0}
           className="btn-outline btn-sm" title="Go to end">
           <SkipForward size={12} />
@@ -81,7 +81,7 @@ export default function PlaybackBar({
           className="h-full rounded-full"
           style={{ background: accentColor }}
           animate={{ width: `${progress}%` }}
-          transition={{ duration: 0.15 }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
         />
       </div>
 

@@ -46,6 +46,9 @@ export type PDAStopReason =
   | 'accepted-final'
   | 'accepted-empty'
   | 'rejected-no-transition'
+  | 'rejected-input-not-consumed'
+  | 'rejected-stack-mismatch'
+  | 'rejected-invalid-order'
   | 'rejected'
   | 'loop'
   | 'stepLimit'
@@ -260,8 +263,65 @@ export function parsePDADefinition(input: string): { pda: PDADefinition | null; 
 function isAccepting(config: PDAConfiguration, pda: PDADefinition, mode: 'final-state' | 'empty-stack'): boolean {
   if (config.remainingInput.length > 0) return false;
   if (mode === 'final-state') return pda.acceptStates.includes(config.state);
-  if (mode === 'empty-stack') return config.stack.length === 0;
+  if (mode === 'empty-stack') {
+    return config.stack.length === 0 || (config.stack.length === 1 && config.stack[0] === pda.initialStackSymbol);
+  }
   return false;
+}
+
+function classifyDeadEnd(config: PDAConfiguration, pda: PDADefinition, mode: 'final-state' | 'empty-stack'): {
+  stopReason: PDAStopReason;
+  message: string;
+} {
+  if (config.remainingInput.length > 0) {
+    const nextInput = config.remainingInput[0];
+    const stackTop = config.stack[0] ?? '';
+    const stateTransitions = pda.transitions.filter((t) => t.fromState === config.state);
+
+    if (stateTransitions.length === 0) {
+      return { stopReason: 'rejected-no-transition', message: '✗ No valid transition from the current state.' };
+    }
+
+    const inputCompatible = stateTransitions.filter((t) => t.inputSymbol === '' || t.inputSymbol === nextInput);
+    if (inputCompatible.length === 0) {
+      return {
+        stopReason: 'rejected-invalid-order',
+        message: `✗ Invalid symbol order: cannot consume "${nextInput}" from state ${config.state}.`,
+      };
+    }
+
+    const hasStackCompatible = inputCompatible.some((t) => t.stackTop === '' || t.stackTop === stackTop);
+    if (!hasStackCompatible) {
+      return {
+        stopReason: 'rejected-stack-mismatch',
+        message: `✗ Stack mismatch: top-of-stack "${stackTop || 'ε'}" does not match any valid transition.`,
+      };
+    }
+
+    return {
+      stopReason: 'rejected-input-not-consumed',
+      message: '✗ Input not fully consumed before computation halted.',
+    };
+  }
+
+  if (mode === 'final-state' && !pda.acceptStates.includes(config.state)) {
+    return {
+      stopReason: 'rejected',
+      message: '✗ Input consumed, but halted in a non-accepting state.',
+    };
+  }
+
+  if (mode === 'empty-stack' && !(config.stack.length === 0 || (config.stack.length === 1 && config.stack[0] === pda.initialStackSymbol))) {
+    return {
+      stopReason: 'rejected-stack-mismatch',
+      message: '✗ Stack mismatch: input consumed but stack is not empty.',
+    };
+  }
+
+  return {
+    stopReason: 'rejected-no-transition',
+    message: '✗ No valid transition available.',
+  };
 }
 
 function getApplicableTransitions(config: PDAConfiguration, pda: PDADefinition): PDATransition[] {
@@ -302,27 +362,28 @@ export function simulatePDA(
     stack: [pda.initialStackSymbol],
   };
 
-  // BFS over all nondeterministic paths
   type Path = { config: PDAConfiguration; steps: PDAStep[]; visited: Set<string> };
+  const initialStep: PDAStep = {
+    stepNum: 0,
+    config: initialConfig,
+    appliedTransition: null,
+    explanation: `Initial configuration. State: ${initialConfig.state}, Input: "${input}", Stack: [${initialConfig.stack.join(',')}]`,
+    isAccepting: isAccepting(initialConfig, pda, mode),
+  };
+
   const queue: Path[] = [{
     config: initialConfig,
-    steps: [{
-      stepNum: 0,
-      config: initialConfig,
-      appliedTransition: null,
-      explanation: `Initial configuration. State: ${initialConfig.state}, Input: "${input}", Stack: [${initialConfig.stack.join(',')}]`,
-      isAccepting: isAccepting(initialConfig, pda, mode),
-    }],
+    steps: [initialStep],
     visited: new Set([JSON.stringify(initialConfig)]),
   }];
 
-  let acceptedPath: PDAStep[] | null = null;
-  let allPaths: PDAStep[][] = [];
+  const allPaths: PDAStep[][] = [];
   let sawLoop = false;
   let sawStepLimit = false;
   let sawDeadEnd = false;
+  let deadEndWitness: { steps: PDAStep[]; config: PDAConfiguration } | null = null;
 
-  while (queue.length > 0 && allPaths.length < 20) {
+  while (queue.length > 0) {
     const { config, steps, visited } = queue.shift()!;
 
     if (steps.length > maxSteps) {
@@ -331,15 +392,25 @@ export function simulatePDA(
     }
 
     if (isAccepting(config, pda, mode)) {
-      if (!acceptedPath) acceptedPath = steps;
-      allPaths.push(steps);
-      continue;
+      if (allPaths.length < 20) allPaths.push(steps);
+      return {
+        steps,
+        accepted: true,
+        acceptanceMode: mode,
+        message: mode === 'final-state' ? '✓ Accepted by final state.' : '✓ Accepted by empty stack.',
+        allPaths,
+        stopReason: mode === 'final-state' ? 'accepted-final' : 'accepted-empty',
+        loopDetected: false,
+      };
     }
 
     const applicable = getApplicableTransitions(config, pda);
     if (applicable.length === 0) {
       sawDeadEnd = true;
-      allPaths.push(steps);
+      if (!deadEndWitness || (deadEndWitness.config.remainingInput.length === 0 && config.remainingInput.length > 0)) {
+        deadEndWitness = { steps, config };
+      }
+      if (allPaths.length < 20) allPaths.push(steps);
       continue;
     }
 
@@ -363,25 +434,7 @@ export function simulatePDA(
     }
   }
 
-  if (acceptedPath) {
-    return {
-      steps: acceptedPath,
-      accepted: true,
-      acceptanceMode: mode,
-      message: mode === 'final-state' ? '✓ Accepted by final state.' : '✓ Accepted by empty stack.',
-      allPaths,
-      stopReason: mode === 'final-state' ? 'accepted-final' : 'accepted-empty',
-      loopDetected: false,
-    };
-  }
-
-  const fallbackSteps = allPaths[0] || [{
-    stepNum: 0,
-    config: initialConfig,
-    appliedTransition: null,
-    explanation: 'No transitions applicable from initial configuration.',
-    isAccepting: false,
-  }];
+  const fallbackSteps = deadEndWitness?.steps || allPaths[0] || [initialStep];
 
   if (sawStepLimit && !sawDeadEnd) {
     return {
@@ -407,14 +460,15 @@ export function simulatePDA(
     };
   }
 
-  if (sawDeadEnd) {
+  if (sawDeadEnd && deadEndWitness) {
+    const rejection = classifyDeadEnd(deadEndWitness.config, pda, mode);
     return {
-      steps: fallbackSteps,
+      steps: deadEndWitness.steps,
       accepted: false,
       acceptanceMode: mode,
-      message: '✗ No valid transition → rejected.',
+      message: rejection.message,
       allPaths,
-      stopReason: 'rejected-no-transition',
+      stopReason: rejection.stopReason,
       loopDetected: sawLoop,
     };
   }
@@ -445,34 +499,30 @@ export async function simulatePDAAsync(
   };
 
   type Path = { config: PDAConfiguration; steps: PDAStep[]; visited: Set<string> };
+  const initialStep: PDAStep = {
+    stepNum: 0,
+    config: initialConfig,
+    appliedTransition: null,
+    explanation: `Initial configuration. State: ${initialConfig.state}, Input: "${input}", Stack: [${initialConfig.stack.join(',')}]`,
+    isAccepting: isAccepting(initialConfig, pda, mode),
+  };
+
   const queue: Path[] = [{
     config: initialConfig,
-    steps: [{
-      stepNum: 0,
-      config: initialConfig,
-      appliedTransition: null,
-      explanation: `Initial configuration. State: ${initialConfig.state}, Input: "${input}", Stack: [${initialConfig.stack.join(',')}]`,
-      isAccepting: isAccepting(initialConfig, pda, mode),
-    }],
+    steps: [initialStep],
     visited: new Set([JSON.stringify(initialConfig)]),
   }];
 
-  let acceptedPath: PDAStep[] | null = null;
   const allPaths: PDAStep[][] = [];
   let sawLoop = false;
   let sawStepLimit = false;
   let sawDeadEnd = false;
+  let deadEndWitness: { steps: PDAStep[]; config: PDAConfiguration } | null = null;
   const CHUNK_SIZE = 120;
 
-  while (queue.length > 0 && allPaths.length < 20) {
+  while (queue.length > 0) {
     if (checkCancelled()) {
-      const cancelledSteps = acceptedPath || allPaths[0] || queue[0]?.steps || [{
-        stepNum: 0,
-        config: initialConfig,
-        appliedTransition: null,
-        explanation: 'Execution stopped by user.',
-        isAccepting: false,
-      }];
+      const cancelledSteps = deadEndWitness?.steps || allPaths[0] || queue[0]?.steps || [initialStep];
       return {
         steps: cancelledSteps,
         accepted: false,
@@ -484,7 +534,7 @@ export async function simulatePDAAsync(
       };
     }
 
-    for (let c = 0; c < CHUNK_SIZE && queue.length > 0 && allPaths.length < 20; c++) {
+    for (let c = 0; c < CHUNK_SIZE && queue.length > 0; c++) {
       const { config, steps, visited } = queue.shift()!;
 
       if (steps.length > maxSteps) {
@@ -493,15 +543,25 @@ export async function simulatePDAAsync(
       }
 
       if (isAccepting(config, pda, mode)) {
-        if (!acceptedPath) acceptedPath = steps;
-        allPaths.push(steps);
-        continue;
+        if (allPaths.length < 20) allPaths.push(steps);
+        return {
+          steps,
+          accepted: true,
+          acceptanceMode: mode,
+          message: mode === 'final-state' ? '✓ Accepted by final state.' : '✓ Accepted by empty stack.',
+          allPaths,
+          stopReason: mode === 'final-state' ? 'accepted-final' : 'accepted-empty',
+          loopDetected: false,
+        };
       }
 
       const applicable = getApplicableTransitions(config, pda);
       if (applicable.length === 0) {
         sawDeadEnd = true;
-        allPaths.push(steps);
+        if (!deadEndWitness || (deadEndWitness.config.remainingInput.length === 0 && config.remainingInput.length > 0)) {
+          deadEndWitness = { steps, config };
+        }
+        if (allPaths.length < 20) allPaths.push(steps);
         continue;
       }
 
@@ -526,30 +586,12 @@ export async function simulatePDAAsync(
       }
     }
 
-    const progressSteps = acceptedPath || allPaths[0] || queue[0]?.steps;
+    const progressSteps = deadEndWitness?.steps || allPaths[0] || queue[0]?.steps;
     if (progressSteps) onProgress(progressSteps);
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
-  if (acceptedPath) {
-    return {
-      steps: acceptedPath,
-      accepted: true,
-      acceptanceMode: mode,
-      message: mode === 'final-state' ? '✓ Accepted by final state.' : '✓ Accepted by empty stack.',
-      allPaths,
-      stopReason: mode === 'final-state' ? 'accepted-final' : 'accepted-empty',
-      loopDetected: false,
-    };
-  }
-
-  const fallbackSteps = allPaths[0] || [{
-    stepNum: 0,
-    config: initialConfig,
-    appliedTransition: null,
-    explanation: 'No transitions applicable from initial configuration.',
-    isAccepting: false,
-  }];
+  const fallbackSteps = deadEndWitness?.steps || allPaths[0] || [initialStep];
 
   if (sawStepLimit && !sawDeadEnd) {
     return {
@@ -575,14 +617,15 @@ export async function simulatePDAAsync(
     };
   }
 
-  if (sawDeadEnd) {
+  if (sawDeadEnd && deadEndWitness) {
+    const rejection = classifyDeadEnd(deadEndWitness.config, pda, mode);
     return {
-      steps: fallbackSteps,
+      steps: deadEndWitness.steps,
       accepted: false,
       acceptanceMode: mode,
-      message: '✗ No valid transition → rejected.',
+      message: rejection.message,
       allPaths,
-      stopReason: 'rejected-no-transition',
+      stopReason: rejection.stopReason,
       loopDetected: sawLoop,
     };
   }
@@ -654,7 +697,7 @@ export function buildPathTree(
   function isAcceptingConfig(cfg: PDAConfiguration, p: PDADefinition, m: 'final-state' | 'empty-stack') {
     if (cfg.remainingInput.length > 0) return false;
     if (m === 'final-state') return p.acceptStates.includes(cfg.state);
-    return cfg.stack.length === 0;
+    return cfg.stack.length === 0 || (cfg.stack.length === 1 && cfg.stack[0] === p.initialStackSymbol);
   }
 
   function grow(node: PDAPathNode, visited: Set<string>, depth: number): void {

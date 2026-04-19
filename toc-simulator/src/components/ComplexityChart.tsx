@@ -83,7 +83,7 @@ export default function ComplexityChart({
               <line x1={pad.left} y1={ySVG} x2={pad.left + innerW} y2={ySVG}
                 stroke="var(--border)" strokeWidth="1" strokeDasharray="4,4" />
               <text x={pad.left - 6} y={ySVG + 4}
-                textAnchor="end" fontSize="9" fontFamily="JetBrains Mono" fill="var(--ink-3)">
+                textAnchor="end" fontSize="9" fontFamily="IBM Plex Mono" fill="var(--ink-3)">
                 {yValue.toFixed(0)}
               </text>
             </g>
@@ -102,7 +102,7 @@ export default function ComplexityChart({
           const svgX = pad.left + ((d.inputLength - xMin) / Math.max(xMax - xMin, 1)) * innerW;
           return (
             <text key={i} x={svgX} y={pad.top + innerH + 14}
-              textAnchor="middle" fontSize="9" fontFamily="JetBrains Mono" fill="var(--ink-3)">
+              textAnchor="middle" fontSize="9" fontFamily="IBM Plex Mono" fill="var(--ink-3)">
               {d.inputLength}
             </text>
           );
@@ -142,11 +142,11 @@ export default function ComplexityChart({
 
         {/* Axis labels */}
         <text x={pad.left + innerW / 2} y={height - 6}
-          textAnchor="middle" fontSize="10" fontFamily="JetBrains Mono" fill="var(--ink-3)">
+          textAnchor="middle" fontSize="10" fontFamily="IBM Plex Mono" fill="var(--ink-3)">
           {xLabel}
         </text>
         <text x={12} y={pad.top + innerH / 2}
-          textAnchor="middle" fontSize="10" fontFamily="JetBrains Mono" fill="var(--ink-3)"
+          textAnchor="middle" fontSize="10" fontFamily="IBM Plex Mono" fill="var(--ink-3)"
           transform={`rotate(-90, 12, ${pad.top + innerH / 2})`}>
           {yLabel}
         </text>

@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
-  RotateCcw,
   BookOpen,
   Cpu,
   AlertTriangle,
@@ -25,11 +24,12 @@ import {
   type TMExample,
   type TMStopReason,
 } from '../engine/tm/TMEngine';
-import PlaybackBar from '../components/PlaybackBar';
+import ExecutionControlBar from '../components/ExecutionControlBar';
 
 const TAPE_WINDOW_CELLS = 17;
 
 type ExampleGroupId = 'basic' | 'recognizers' | 'arithmetic' | 'utility';
+type TMSection = 'simulation' | 'membership' | 'execution-trace';
 
 const EXAMPLE_GROUPS: Array<{ id: ExampleGroupId; title: string; icon: typeof Binary; names: string[] }> = [
   {
@@ -64,6 +64,23 @@ const DEFAULT_GROUP_COLLAPSED: Record<ExampleGroupId, boolean> = {
   arithmetic: false,
   utility: false,
 };
+
+const TM_SECTIONS: Array<{ id: TMSection; label: string }> = [
+  { id: 'simulation', label: 'Simulation' },
+  { id: 'membership', label: 'Membership' },
+  { id: 'execution-trace', label: 'Execution Trace' },
+];
+
+function getTMMembershipReason(result: { stopReason: TMStopReason; ok: boolean } | null): string {
+  if (!result) return 'Run the simulator to evaluate membership.';
+  if (result.stopReason === 'accepted') return 'Accepted by reaching the accept state.';
+  if (result.stopReason === 'rejected') return 'Rejected by reaching the reject state.';
+  if (result.stopReason === 'halted') return 'Halted without acceptance (no valid transition).';
+  if (result.stopReason === 'loop') return 'Halted after loop detection.';
+  if (result.stopReason === 'stepLimit') return 'Halted due to step limit.';
+  if (result.stopReason === 'stopped') return 'Execution stopped before completion.';
+  return result.ok ? 'Accepted.' : 'Rejected.';
+}
 
 function TapeDisplay({ step, blank, animate }: { step: TMStep; blank: string; animate: boolean }) {
   const chars = step.tapeSnapshot.split('');
@@ -135,6 +152,7 @@ function TapeDisplay({ step, blank, animate }: { step: TMStep; blank: string; an
 }
 
 export default function TMSimulator() {
+  const [activeSection, setActiveSection] = useState<TMSection>('simulation');
   const [activeExample, setActiveExample] = useState<TMExample | null>(TM_EXAMPLES[0]);
   const [exampleSearch, setExampleSearch] = useState('');
   const [collapsedGroups, setCollapsedGroups] = useState<Record<ExampleGroupId, boolean>>(DEFAULT_GROUP_COLLAPSED);
@@ -329,20 +347,6 @@ export default function TMSimulator() {
     }
     stopAuto();
   }, [isSimulating, stopAuto, stopSimulation]);
-
-  const togglePlay = useCallback(() => {
-    if (isRunning) {
-      stopAuto();
-      return;
-    }
-
-    if (!simulated || steps.length === 0) return;
-
-    if (curStep >= steps.length - 1) {
-      setCurStep(0);
-    }
-    startAuto(steps.length - 1);
-  }, [isRunning, simulated, steps.length, curStep, startAuto, stopAuto]);
 
   useEffect(
     () => () => {
@@ -539,35 +543,30 @@ export default function TMSimulator() {
         </div>
 
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-auto p-5 dot-grid">
+          <div className="flex-1 overflow-auto p-5 pb-28 dot-grid">
             <div className="space-y-4">
+              <div className="card p-2">
+                <div className="flex gap-2 flex-wrap">
+                  {TM_SECTIONS.map((section) => (
+                    <button
+                      key={section.id}
+                      onClick={() => setActiveSection(section.id)}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                        activeSection === section.id
+                          ? 'bg-[var(--tm-bg)] border-[var(--tm-border)] text-[var(--tm)]'
+                          : 'bg-[var(--surface)] border-[var(--border)] text-[var(--ink-3)] hover:text-[var(--ink)]'
+                      }`}
+                    >
+                      {section.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="card p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <p className="section-label mb-0">Execution Controls</p>
+                  <p className="section-label mb-0">Execution Status</p>
                   <span className={`pill ${statusPillClass}`}>{executionStatus}</span>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={() => void handleRun()} disabled={isSimulating} className="btn-tm min-w-24 justify-center">
-                    {isFastMode ? 'Fast Run' : 'Run'}
-                  </button>
-                  <button
-                    onClick={() => void handleStep()}
-                    disabled={isFastMode || isSimulating}
-                    className="btn-outline min-w-24 justify-center"
-                  >
-                    Step
-                  </button>
-                  <button
-                    onClick={handlePause}
-                    disabled={!isRunning && !isSimulating}
-                    className="btn-outline min-w-24 justify-center"
-                  >
-                    Pause
-                  </button>
-                  <button onClick={resetAll} disabled={!simulated && !isSimulating} className="btn-outline min-w-24 justify-center">
-                    <RotateCcw size={12} /> Reset
-                  </button>
                 </div>
 
                 <p className="text-[10px] font-mono text-[var(--ink-3)] mt-2">
@@ -596,7 +595,7 @@ export default function TMSimulator() {
                 </motion.div>
               )}
 
-              {simulated && cur ? (
+              {activeSection === 'simulation' && simulated && cur ? (
                 <>
                   <div className={`card p-5 overflow-x-auto ${shouldShake ? 'animate-shake' : ''}`}>
                     <div className="flex items-center justify-between mb-3">
@@ -660,39 +659,125 @@ export default function TMSimulator() {
                     </div>
                   )}
                 </>
-              ) : (
+              ) : activeSection === 'simulation' ? (
                 <div className="flex flex-col items-center justify-center h-56 text-center text-[var(--ink-3)] card">
                   <Cpu size={40} className="mb-3 opacity-20" />
                   <p className="text-sm">Select an example or define your TM, then use Run/Step.</p>
                   <p className="text-xs mt-1 font-mono opacity-60">loop detection active | step limit {TM_DEFAULT_MAX_STEPS}</p>
                 </div>
+              ) : null}
+
+              {activeSection === 'membership' && (
+                <div className="space-y-3">
+                  {simulated ? (
+                    <>
+                      <div className={result?.ok ? 'result-accept' : result?.stopReason === 'halted' || result?.stopReason === 'loop' || result?.stopReason === 'stepLimit' ? 'result-warn' : 'result-reject'}>
+                        {result?.ok ? 'Accepted' : result?.stopReason === 'halted' ? 'Halted' : 'Rejected'}
+                      </div>
+
+                      <div className="card p-4">
+                        <p className="section-label mb-1">Membership Result</p>
+                        <p className="text-sm text-[var(--ink)]">Input string: <span className="font-mono">{inputStr || '_'}</span></p>
+                        <p className="text-xs text-[var(--ink-3)] mt-1 leading-relaxed">{getTMMembershipReason(result)}</p>
+                        <p className="text-xs text-[var(--ink-3)] mt-1 leading-relaxed">{result?.msg}</p>
+                      </div>
+
+                      {cur && (
+                        <div className="card p-4">
+                          <p className="section-label mb-1">Final Machine Snapshot</p>
+                          <p className="text-xs font-mono text-[var(--ink-2)]">Final state: {cur.state}</p>
+                          <p className="text-xs font-mono text-[var(--ink-2)]">Head position: {cur.tapeMin + cur.headPosition}</p>
+                          <p className="text-xs font-mono text-[var(--ink-2)]">Steps executed: {Math.max(steps.length - 1, 0)}</p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="card flex flex-col items-center justify-center h-52 text-center text-[var(--ink-3)]">
+                      <p className="text-sm">Run the machine to check if the input string is accepted, rejected, or halted.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeSection === 'execution-trace' && (
+                <div className="card p-4">
+                  <p className="section-label mb-2">Execution Trace</p>
+                  {simulated && steps.length > 0 ? (
+                    <div className="overflow-y-auto max-h-[430px]">
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0" style={{ background: 'var(--bg-2)' }}>
+                          <tr className="border-b border-[var(--border)]">
+                            {['Step', 'State', 'Tape', 'Head', 'Result'].map((h) => (
+                              <th key={h} className="text-left py-1.5 px-2 font-mono text-[10px] text-[var(--ink-3)]">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {steps.map((s, i) => (
+                            <tr
+                              key={`tm-trace-center-${i}`}
+                              onClick={() => setCurStep(i)}
+                              className="border-b border-[var(--border)] cursor-pointer transition-colors"
+                              style={curStep === i ? { background: 'var(--tm-bg)' } : {}}
+                            >
+                              <td className="py-1.5 px-2 font-mono text-[var(--ink-3)]">{s.stepNum}</td>
+                              <td className="py-1.5 px-2 font-mono font-bold text-[var(--tm)]">{s.state}</td>
+                              <td className="py-1.5 px-2 font-mono text-[var(--ink-2)] max-w-44 truncate">{s.tapeSnapshot || '_'}</td>
+                              <td className="py-1.5 px-2 font-mono text-[var(--ink-3)]">{s.tapeMin + s.headPosition}</td>
+                              <td className="py-1.5 px-2">
+                                {s.accepted ? <span className="pill pill-cfg">A</span> : s.rejected ? <span className="pill pill-tm">R</span> : <span className="text-[10px] font-mono text-[var(--ink-3)]">-</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="h-44 flex items-center justify-center text-center text-[var(--ink-3)] text-sm">
+                      Run the machine to generate the execution trace.
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
 
-          {!isFastMode && (
-            <PlaybackBar
-              currentStep={simulated ? curStep : -1}
-              totalSteps={steps.length}
-              isRunning={isRunning}
-              speed={speed}
-              onFirst={() => setCurStep(0)}
-              onPrev={() => setCurStep((p) => Math.max(0, p - 1))}
-              onNext={() => setCurStep((p) => Math.min(steps.length - 1, p + 1))}
-              onLast={() => setCurStep(Math.max(steps.length - 1, 0))}
-              onTogglePlay={togglePlay}
-              onSpeedChange={(s) => {
-                setSpeed(s);
-                stopAuto();
-              }}
-              accentClass="btn-tm"
-              accentColor="var(--tm)"
-            />
-          )}
         </div>
 
-        {!isFastMode && simulated && steps.length > 0 && (
-          <div className="w-72 border-l border-[var(--border)] flex flex-col shrink-0 overflow-hidden" style={{ background: 'var(--surface)' }}>
+        <div className="w-72 border-l border-[var(--border)] flex flex-col shrink-0 overflow-hidden" style={{ background: 'var(--surface)' }}>
+          <div className="p-3 border-b border-[var(--border)]">
+            <p className="section-label">
+              {activeSection === 'simulation' ? 'Execution Details' : activeSection === 'membership' ? 'Membership Details' : 'Trace Details'}
+            </p>
+          </div>
+
+          {activeSection === 'simulation' && simulated && cur ? (
+            <div className="p-3 space-y-2 text-xs text-[var(--ink-3)]">
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-2)] p-3">
+                <p className="section-label mb-1">Current transition</p>
+                <p className="leading-relaxed">{cur.appliedTransition ? cur.explanation : 'No transition applied at this step.'}</p>
+              </div>
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-2)] p-3">
+                <p className="section-label mb-1">Current state</p>
+                <p className="font-mono text-[var(--ink)]">{cur.state}</p>
+              </div>
+            </div>
+          ) : null}
+
+          {activeSection === 'membership' && simulated ? (
+            <div className="p-3 space-y-2 text-xs text-[var(--ink-3)]">
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-2)] p-3">
+                <p className="section-label mb-1">Result</p>
+                <p className={result?.ok ? 'text-[var(--cfg)] font-semibold' : result?.stopReason === 'halted' ? 'text-amber-700 font-semibold' : 'text-[var(--tm)] font-semibold'}>
+                  {result?.ok ? 'Accepted' : result?.stopReason === 'halted' ? 'Halted' : 'Rejected'}
+                </p>
+                <p className="mt-1 leading-relaxed">{getTMMembershipReason(result)}</p>
+              </div>
+            </div>
+          ) : null}
+
+          {activeSection === 'execution-trace' && !isFastMode && simulated && steps.length > 0 ? (
+            <>
             <div className="p-3 border-b border-[var(--border)]">
               <p className="section-label">Execution Trace</p>
             </div>
@@ -732,9 +817,45 @@ export default function TMSimulator() {
                 </tbody>
               </table>
             </div>
-          </div>
-        )}
+            </>
+          ) : null}
+
+          {(!simulated || (activeSection === 'execution-trace' && (isFastMode || steps.length === 0))) && (
+            <div className="flex-1 flex items-center justify-center text-center px-5 text-[var(--ink-3)] text-sm">
+              {activeSection === 'membership'
+                ? 'Run the machine to view membership details.'
+                : activeSection === 'execution-trace'
+                  ? 'Execution trace is shown after running in step mode.'
+                  : 'Run the machine to view execution details.'}
+            </div>
+          )}
+        </div>
       </div>
+
+      <ExecutionControlBar
+        accent="tm"
+        status={executionStatus}
+        runLabel={isFastMode ? 'Fast Run' : 'Run'}
+        stepIndicator={steps.length > 0 ? `${curStep + 1} / ${steps.length}` : '- / -'}
+        speed={speed}
+        speeds={[
+          { label: '0.5x', value: 1 },
+          { label: '1x', value: 2 },
+          { label: '2x', value: 3 },
+        ]}
+        onRun={() => void handleRun()}
+        onStep={() => void handleStep()}
+        onPause={handlePause}
+        onReset={resetAll}
+        onSpeedChange={(nextSpeed) => {
+          setSpeed(nextSpeed);
+          stopAuto();
+        }}
+        runDisabled={isRunning || isSimulating}
+        stepDisabled={isRunning || isFastMode || isSimulating}
+        pauseDisabled={!isRunning && !isSimulating}
+        resetDisabled={!simulated && !isSimulating}
+      />
     </div>
   );
 }

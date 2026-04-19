@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import {
-  RotateCcw,
   BookOpen,
   Search,
   History,
@@ -11,18 +10,14 @@ import {
   Languages,
   Calculator,
   AlertTriangle,
-  SkipBack,
-  SkipForward,
-  ChevronLeft,
-  ChevronRight,
   GitBranch,
   TreePine,
 } from 'lucide-react';
+import ExecutionControlBar from '../components/ExecutionControlBar';
 import {
   parseGrammar,
   deriveLeftmost,
   deriveRightmost,
-  detectAmbiguity,
   buildParseTree,
   tokenizeProduction,
   CFG_EXAMPLES,
@@ -34,6 +29,7 @@ import {
 } from '../engine/cfg/CFGEngine';
 
 type CFGGroupId = 'basic' | 'structured' | 'expression' | 'ambiguous';
+type CFGSection = 'derivation' | 'parse-tree' | 'membership';
 
 const CFG_GROUPS: Array<{ id: CFGGroupId; title: string; icon: typeof Binary; names: string[] }> = [
   {
@@ -73,6 +69,12 @@ const SPEEDS = [
   { label: '0.5x', value: 1 },
   { label: '1x', value: 2 },
   { label: '2x', value: 3 },
+];
+
+const CFG_SECTIONS: Array<{ id: CFGSection; label: string }> = [
+  { id: 'derivation', label: 'Derivation' },
+  { id: 'parse-tree', label: 'Parse Tree' },
+  { id: 'membership', label: 'Membership' },
 ];
 
 const CFG_GRAMMAR_MIN_HEIGHT = 100;
@@ -182,7 +184,7 @@ function TreeNodeView({
           y={y + 4}
           textAnchor="middle"
           fontSize="9"
-          fontFamily="JetBrains Mono"
+          fontFamily="IBM Plex Mono"
           fontWeight="700"
           fill={textColor}
         >
@@ -194,6 +196,7 @@ function TreeNodeView({
 }
 
 export default function CFGSimulator() {
+  const [activeSection, setActiveSection] = useState<CFGSection>('derivation');
   const [activeExample, setActiveExample] = useState<CFGExample | null>(CFG_EXAMPLES[0]);
   const [exampleSearch, setExampleSearch] = useState('');
   const [collapsedGroups, setCollapsedGroups] = useState<Record<CFGGroupId, boolean>>(DEFAULT_GROUPS);
@@ -214,11 +217,6 @@ export default function CFGSimulator() {
   const [errors, setErrors] = useState<string[]>([]);
   const [result, setResult] = useState<{ ok: boolean; msg: string; ambiguous: boolean } | null>(null);
   const [treeRoot, setTreeRoot] = useState<ParseTreeNode | null>(null);
-  const [ambiguityDemo, setAmbiguityDemo] = useState<{
-    explanation: string;
-    leftTree: ParseTreeNode;
-    rightTree: ParseTreeNode;
-  } | null>(null);
   const [simulated, setSimulated] = useState(false);
 
   const [grammarInputHeight, setGrammarInputHeight] = useState<number>(() => {
@@ -272,7 +270,6 @@ export default function CFGSimulator() {
     setCurStep(0);
     setResult(null);
     setTreeRoot(null);
-    setAmbiguityDemo(null);
     setErrors([]);
     setGrammar(null);
     setSimulated(false);
@@ -340,27 +337,9 @@ export default function CFGSimulator() {
 
       const nextTree = accepted && chosenSteps.length > 0 ? buildParseTree(parsed, chosenSteps) : null;
 
-      let nextAmbiguityDemo: {
-        explanation: string;
-        leftTree: ParseTreeNode;
-        rightTree: ParseTreeNode;
-      } | null = null;
-
-      if (accepted) {
-        const ambiguity = detectAmbiguity(parsed, inputStr);
-        if (ambiguity.isAmbiguous && ambiguity.derivation1.length > 0 && ambiguity.derivation2.length > 0) {
-          nextAmbiguityDemo = {
-            explanation: ambiguity.explanation,
-            leftTree: buildParseTree(parsed, ambiguity.derivation1),
-            rightTree: buildParseTree(parsed, ambiguity.derivation2),
-          };
-        }
-      }
-
       setSteps(chosenSteps);
       setTreeRoot(nextTree);
-      setAmbiguityDemo(nextAmbiguityDemo);
-      setResult({ ok: accepted, msg: message, ambiguous: Boolean(nextAmbiguityDemo) });
+      setResult({ ok: accepted, msg: message, ambiguous: false });
       setSimulated(true);
       setCurStep(isFastMode ? chosenSteps.length : 0);
       setIsSimulating(false);
@@ -467,29 +446,25 @@ export default function CFGSimulator() {
     .filter((example): example is CFGExample => Boolean(example));
 
   const totalFrames = simulated ? steps.length + 1 : 0;
-  const isAtEnd = simulated && curStep >= steps.length;
-
   const currentStep = curStep === 0 ? null : steps[curStep - 1] ?? null;
   const previousSentential = curStep <= 1 ? startSymbol : steps[curStep - 2]?.sentential ?? startSymbol;
   const currentSentential = curStep === 0 ? startSymbol : steps[curStep - 1]?.sentential || 'ε';
 
   const executionStatus = isRunning || isSimulating
-    ? 'In progress'
+    ? 'Running'
     : !simulated
       ? 'Idle'
       : result?.ok
         ? 'Accepted'
         : 'Rejected';
 
-  const statusPillClass = executionStatus === 'In progress'
+  const statusPillClass = executionStatus === 'Running'
     ? 'pill-pda'
     : executionStatus === 'Accepted'
       ? 'pill-cfg'
       : executionStatus === 'Rejected'
         ? 'pill-tm'
         : 'pill-gray';
-
-  const progress = totalFrames > 1 ? (curStep / (totalFrames - 1)) * 100 : 0;
 
   const displayTree = useMemo(() => {
     if (!treeRoot) return null;
@@ -682,8 +657,26 @@ export default function CFGSimulator() {
         </div>
 
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-auto p-5 dot-grid">
+          <div className="flex-1 overflow-auto p-5 pb-28 dot-grid">
             <div className="space-y-4">
+              <div className="card p-2">
+                <div className="flex gap-2 flex-wrap">
+                  {CFG_SECTIONS.map((section) => (
+                    <button
+                      key={section.id}
+                      onClick={() => setActiveSection(section.id)}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                        activeSection === section.id
+                          ? 'bg-[var(--cfg-bg)] border-[var(--cfg-border)] text-[var(--cfg)]'
+                          : 'bg-[var(--surface)] border-[var(--border)] text-[var(--ink-3)] hover:text-[var(--ink)]'
+                      }`}
+                    >
+                      {section.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="card p-4">
                 <div className="flex items-center justify-between mb-3">
                   <p className="section-label mb-0">Execution Status</p>
@@ -715,7 +708,7 @@ export default function CFGSimulator() {
                 </motion.div>
               )}
 
-              {simulated ? (
+              {simulated && activeSection === 'derivation' ? (
                 <>
                   <div className="card p-5">
                     <div className="flex items-center justify-between mb-2">
@@ -751,168 +744,111 @@ export default function CFGSimulator() {
                     )}
                   </div>
 
-                  <div className="card p-4 overflow-x-auto">
-                    <div className="flex items-center justify-between mb-3">
-                      <p className="section-label mb-0">Parse Tree</p>
-                      <div className="flex items-center gap-1 text-[10px] font-mono text-[var(--ink-3)]">
-                        <TreePine size={11} />
-                        progressive expansion
-                      </div>
-                    </div>
+                  <div className="card p-3">
+                    <p className="section-label mb-1">Derivation Summary</p>
+                    <p className="text-xs font-mono text-[var(--ink-2)]">Total derivation steps: {steps.length}</p>
+                    <p className="text-xs font-mono text-[var(--ink-2)]">Input string: {inputStr || 'ε'}</p>
+                    <p className="text-xs font-mono text-[var(--ink-2)]">Mode: {derivationType}</p>
+                  </div>
+                </>
+              ) : null}
 
-                    {displayTree ? (
-                      <svg style={{ minWidth: displayTreeWidth, overflow: 'visible' }} height={340}>
-                        <TreeNodeView
-                          key={`${curStep}-${isFastMode ? 'fast' : 'step'}`}
-                          node={displayTree}
-                          x={displayTreeWidth / 2}
-                          y={34}
-                          spread={Math.max(120, displayTreeWidth / 2.8)}
-                          depth={0}
-                          animate={!isFastMode}
-                        />
-                      </svg>
-                    ) : (
-                      <div className="h-40 flex items-center justify-center text-center text-[var(--ink-3)] text-sm">
-                        Run the simulator to generate a parse tree.
-                      </div>
-                    )}
+              {activeSection === 'parse-tree' && (
+                <div className="card p-4 overflow-x-auto">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="section-label mb-0">Parse Tree</p>
+                    <div className="flex items-center gap-1 text-[10px] font-mono text-[var(--ink-3)]">
+                      <TreePine size={11} />
+                      centered visualization
+                    </div>
                   </div>
 
-                  {ambiguityDemo && isAtEnd && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="card p-4 border-l-4"
-                      style={{ borderLeftColor: '#f59e0b' }}
-                    >
-                      <div className="flex items-center gap-2 mb-2 text-[#92400e]">
-                        <AlertTriangle size={14} />
-                        <p className="text-sm font-bold">Simple Ambiguity Demo</p>
-                      </div>
-                      <p className="text-xs text-[var(--ink-3)] mb-3">{ambiguityDemo.explanation}</p>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        {[
-                          { label: 'Parse Tree A', root: ambiguityDemo.leftTree },
-                          { label: 'Parse Tree B', root: ambiguityDemo.rightTree },
-                        ].map((tree) => {
-                          const width = Math.max(320, leafCount(tree.root) * 62);
-
-                          return (
-                            <div key={tree.label} className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2 overflow-x-auto">
-                              <p className="section-label mb-1">{tree.label}</p>
-                              <svg style={{ minWidth: width, overflow: 'visible' }} height={230}>
-                                <TreeNodeView
-                                  node={tree.root}
-                                  x={width / 2}
-                                  y={26}
-                                  spread={Math.max(100, width / 2.8)}
-                                  depth={0}
-                                  animate={false}
-                                />
-                              </svg>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </motion.div>
+                  {simulated && result?.ok && displayTree ? (
+                    <svg style={{ minWidth: displayTreeWidth, overflow: 'visible' }} height={340}>
+                      <TreeNodeView
+                        key={`${curStep}-${isFastMode ? 'fast' : 'step'}`}
+                        node={displayTree}
+                        x={displayTreeWidth / 2}
+                        y={34}
+                        spread={Math.max(120, displayTreeWidth / 2.8)}
+                        depth={0}
+                        animate={!isFastMode}
+                      />
+                    </svg>
+                  ) : (
+                    <div className="h-44 flex items-center justify-center text-center text-[var(--ink-3)] text-sm">
+                      {simulated && !result?.ok
+                        ? 'Parse tree is available only for accepted derivations.'
+                        : 'Run the simulator to render a parse tree.'}
+                    </div>
                   )}
-                </>
-              ) : (
+                </div>
+              )}
+
+              {activeSection === 'membership' && (
+                <div className="space-y-3">
+                  {simulated ? (
+                    <>
+                      <div className={result?.ok ? 'result-accept' : 'result-reject'}>
+                        {result?.ok ? 'Accepted' : 'Rejected'}
+                      </div>
+
+                      <div className="card p-4">
+                        <p className="section-label mb-1">Membership Result</p>
+                        <p className="text-sm text-[var(--ink)]">Input string: <span className="font-mono">{inputStr || 'ε'}</span></p>
+                        <p className="text-xs text-[var(--ink-3)] mt-1 leading-relaxed">{result?.msg}</p>
+                      </div>
+
+                      {result?.ok ? (
+                        <div className="card p-4">
+                          <p className="section-label mb-2">Derivation for accepted input</p>
+                          <div className="space-y-1 max-h-56 overflow-y-auto">
+                            <p className="text-xs font-mono text-[var(--ink)]">0. {startSymbol || 'S'} (Start)</p>
+                            {steps.map((step, index) => (
+                              <p key={`membership-step-${index}`} className="text-xs font-mono text-[var(--ink)] break-all">
+                                {index + 1}. {step.sentential || 'ε'}
+                                <span className="ml-2 text-[var(--cfg)]">{step.rule}</span>
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="card p-4">
+                          <p className="section-label mb-1">Failure reasoning</p>
+                          <p className="text-xs text-[var(--ink-3)] leading-relaxed">
+                            The grammar could not derive the input string within {CFG_DEFAULT_MAX_STEPS} steps using {derivationType} derivation.
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="card flex flex-col items-center justify-center h-52 text-center text-[var(--ink-3)]">
+                      <p className="text-sm">Run the simulator to check whether the input string belongs to the grammar language.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!simulated ? (
                 <div className="card flex flex-col items-center justify-center h-56 text-center text-[var(--ink-3)]">
                   <GitBranch size={40} className="mb-3 opacity-20" />
                   <p className="text-sm">Choose an example, then run to visualize how the grammar generates your string.</p>
                   <p className="text-xs mt-1 font-mono opacity-60">focused on derivation, parse tree, and acceptance</p>
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
 
-          <div className="border-t border-[var(--border)] px-4 py-2.5" style={{ background: 'var(--surface)' }}>
-            <div className="flex items-center gap-2 mb-2">
-              <button onClick={() => void handleRun()} disabled={isSimulating} className="btn-cfg btn-sm px-4">
-                {isFastMode ? 'Fast Run' : 'Run'}
-              </button>
-              <button onClick={() => void handleStep()} disabled={isFastMode || isSimulating} className="btn-outline btn-sm">
-                Step
-              </button>
-              <button onClick={stopAuto} disabled={!isRunning && !isSimulating} className="btn-outline btn-sm">
-                Pause
-              </button>
-              <button onClick={resetTimeline} disabled={!simulated && !isSimulating} className="btn-outline btn-sm">
-                <RotateCcw size={12} />
-                Reset
-              </button>
-
-              <div className="ml-auto flex items-center gap-1">
-                <button onClick={() => setCurStep(0)} disabled={!simulated || curStep <= 0} className="btn-outline btn-sm">
-                  <SkipBack size={12} />
-                </button>
-                <button
-                  onClick={() => setCurStep((previous) => Math.max(0, previous - 1))}
-                  disabled={!simulated || curStep <= 0}
-                  className="btn-outline btn-sm"
-                >
-                  <ChevronLeft size={12} />
-                </button>
-                <button
-                  onClick={() => setCurStep((previous) => Math.min(steps.length, previous + 1))}
-                  disabled={!simulated || curStep >= steps.length}
-                  className="btn-outline btn-sm"
-                >
-                  <ChevronRight size={12} />
-                </button>
-                <button
-                  onClick={() => setCurStep(steps.length)}
-                  disabled={!simulated || curStep >= steps.length}
-                  className="btn-outline btn-sm"
-                >
-                  <SkipForward size={12} />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <span className="font-mono text-xs text-[var(--ink-3)] shrink-0 w-24">
-                {simulated ? `${curStep + 1} / ${steps.length + 1}` : '- / -'}
-              </span>
-              <div className="flex-1 h-1.5 rounded-full bg-[var(--bg-2)] overflow-hidden">
-                <motion.div
-                  className="h-full rounded-full"
-                  style={{ background: 'var(--cfg)' }}
-                  animate={{ width: `${progress}%` }}
-                  transition={{ duration: 0.15 }}
-                />
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                {SPEEDS.map((option) => (
-                  <button
-                    key={option.value}
-                    onClick={() => {
-                      setSpeed(option.value);
-                      stopAuto();
-                    }}
-                    className={`px-2 py-1 text-xs font-mono rounded-md border transition-all duration-100 ${
-                      speed === option.value
-                        ? 'bg-[var(--ink)] text-white border-[var(--ink)]'
-                        : 'border-[var(--border)] text-[var(--ink-3)] hover:border-[var(--ink-3)]'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
         </div>
 
         <div className="w-80 border-l border-[var(--border)] flex flex-col shrink-0 overflow-hidden" style={{ background: 'var(--surface)' }}>
           <div className="p-3 border-b border-[var(--border)]">
-            <p className="section-label">Step Explanation</p>
+            <p className="section-label">
+              {activeSection === 'derivation' ? 'Step Explanation' : activeSection === 'parse-tree' ? 'Parse Tree Notes' : 'Membership Details'}
+            </p>
           </div>
 
-          {simulated ? (
+          {simulated && activeSection === 'derivation' ? (
             <>
               <div className="p-3 border-b border-[var(--border)] space-y-2">
                 {currentStep ? (
@@ -981,13 +917,65 @@ export default function CFGSimulator() {
                 </table>
               </div>
             </>
+          ) : simulated && activeSection === 'parse-tree' ? (
+            <div className="p-3 space-y-2 text-xs text-[var(--ink-3)]">
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-2)] p-3">
+                <p className="section-label mb-1">Parse Tree Status</p>
+                <p>{result?.ok ? 'Tree generated from accepted derivation.' : 'No tree available for rejected input.'}</p>
+              </div>
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-2)] p-3">
+                <p className="section-label mb-1">Input string</p>
+                <p className="font-mono text-[var(--ink)]">{inputStr || 'ε'}</p>
+              </div>
+            </div>
+          ) : simulated && activeSection === 'membership' ? (
+            <div className="p-3 space-y-2 text-xs text-[var(--ink-3)]">
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-2)] p-3">
+                <p className="section-label mb-1">Result</p>
+                <p className={result?.ok ? 'text-[var(--cfg)] font-semibold' : 'text-[var(--tm)] font-semibold'}>
+                  {result?.ok ? 'Accepted' : 'Rejected'}
+                </p>
+                <p className="mt-1 leading-relaxed">{result?.msg}</p>
+              </div>
+              {result?.ok && (
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-2)] p-3">
+                  <p className="section-label mb-1">Steps</p>
+                  <p>Accepted in {steps.length} derivation steps.</p>
+                </div>
+              )}
+            </div>
           ) : (
             <div className="flex-1 flex items-center justify-center text-center px-5 text-[var(--ink-3)] text-sm">
-              Run a grammar example to see step-by-step rule explanations.
+              {activeSection === 'derivation'
+                ? 'Run a grammar example to see step-by-step rule explanations.'
+                : activeSection === 'parse-tree'
+                  ? 'Run the simulator to view parse tree details.'
+                  : 'Run the simulator to view membership details.'}
             </div>
           )}
         </div>
       </div>
+
+      <ExecutionControlBar
+        accent="cfg"
+        status={executionStatus}
+        runLabel={isFastMode ? 'Fast Run' : 'Run'}
+        stepIndicator={simulated ? `${curStep + 1} / ${steps.length + 1}` : '- / -'}
+        speed={speed}
+        speeds={SPEEDS}
+        onRun={() => void handleRun()}
+        onStep={() => void handleStep()}
+        onPause={stopAuto}
+        onReset={resetTimeline}
+        onSpeedChange={(nextSpeed) => {
+          setSpeed(nextSpeed);
+          stopAuto();
+        }}
+        runDisabled={isRunning || isSimulating}
+        stepDisabled={isRunning || isFastMode || isSimulating}
+        pauseDisabled={!isRunning && !isSimulating}
+        resetDisabled={!simulated && !isSimulating}
+      />
     </div>
   );
 }
