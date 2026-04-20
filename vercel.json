@@ -1,0 +1,8 @@
+{
+  "installCommand": "cd toc-simulator && npm ci",
+  "buildCommand": "cd toc-simulator && npm run build",
+  "outputDirectory": "toc-simulator/dist",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

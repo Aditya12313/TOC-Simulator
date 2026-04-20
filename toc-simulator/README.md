@@ -1,5 +1,28 @@
 # React + TypeScript + Vite
 
+## Vercel Deployment (Important)
+
+The app source lives in the nested folder `toc-simulator`.
+
+### Preferred setup (Vercel Dashboard)
+
+- Set **Root Directory** to `toc-simulator`
+- Framework Preset: `Vite`
+- Build Command: `npm run build`
+- Output Directory: `dist`
+
+### Required files inside `toc-simulator`
+
+- `package.json`
+- `index.html`
+- `src/`
+- `vercel.json` (SPA route fallback)
+
+### Fallback behavior if Root Directory is not set
+
+This repository also includes a root-level `vercel.json` that runs build/install from `toc-simulator` and serves `toc-simulator/dist`.
+This prevents deployment failure when Vercel is accidentally pointed at repository root.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:
