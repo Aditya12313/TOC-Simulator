@@ -142,28 +142,6 @@ The simulator ensures correctness using:
 
 ---
 
-## Project Structure 📁
-
-
-toc-simulator/
-│
-├── src/
-│ ├── components/
-│ ├── pages/
-│ ├── engine/
-│ │ ├── cfg/
-│ │ ├── pda/
-│ │ └── tm/
-│ ├── assets/
-│ └── utils/
-│
-├── public/
-├── index.html
-├── package.json
-└── README.md
-
-
----
 
 ## Technologies Used 💻
 
