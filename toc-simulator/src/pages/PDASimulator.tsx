@@ -22,6 +22,7 @@ import {
   type PDAExample,
   type PDAStopReason,
 } from '../engine/pda/PDAEngine';
+import { shouldFastRejectInput } from '../engine/shared/InputPrecheck';
 
 type PDAGroupId = 'basic' | 'recognizers' | 'patterns';
 type PDASection = 'simulation' | 'membership' | 'execution-trace';
@@ -223,6 +224,21 @@ export default function PDASimulator() {
     resetTimeline();
     cancelSimRef.current = false;
 
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    const usePrecheck = Boolean(
+      activeExample
+        && definition.trim() === activeExample.definition.trim()
+    );
+
+    if (usePrecheck && shouldFastRejectInput('pda', activeExample?.name, inputStr)) {
+      setSteps([]);
+      setResult({ ok: false, msg: 'Rejected.', loop: false, stopReason: 'rejected' });
+      setSimulated(true);
+      setCurStep(0);
+      return null;
+    }
+
     const { pda: parsed, errors: parseErrors } = parsePDADefinition(definition);
     if (parseErrors.length) {
       setErrors(parseErrors);
@@ -251,7 +267,7 @@ export default function PDASimulator() {
     }
 
     return trace;
-  }, [resetTimeline, definition, inputStr, acceptMode, isFastMode, startAuto]);
+  }, [resetTimeline, definition, inputStr, acceptMode, isFastMode, startAuto, activeExample]);
 
   const handleRun = useCallback(async () => {
     if (isSimulating) return;

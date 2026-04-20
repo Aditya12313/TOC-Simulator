@@ -25,6 +25,7 @@ import {
   type TMStopReason,
 } from '../engine/tm/TMEngine';
 import ExecutionControlBar from '../components/ExecutionControlBar';
+import { shouldFastRejectInput } from '../engine/shared/InputPrecheck';
 
 const TAPE_WINDOW_CELLS = 17;
 
@@ -229,6 +230,27 @@ export default function TMSimulator() {
     async (autoStart = false) => {
       resetAll();
       cancelSimRef.current = false;
+
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+      const usePrecheck = Boolean(
+        activeExample
+          && definition.trim() === activeExample.definition.trim()
+      );
+
+      if (usePrecheck && shouldFastRejectInput('tm', activeExample?.name, inputStr)) {
+        setSteps([]);
+        setResult({
+          ok: false,
+          rejected: true,
+          msg: 'Rejected.',
+          loop: false,
+          stopReason: 'rejected',
+        });
+        setSimulated(true);
+        setCurStep(0);
+        return null;
+      }
 
       const { tm: parsed, errors: pe } = parseTMDefinition(definition);
       if (pe.length) {

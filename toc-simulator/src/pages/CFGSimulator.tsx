@@ -27,6 +27,7 @@ import {
   type ParseTreeNode,
   type Grammar,
 } from '../engine/cfg/CFGEngine';
+import { shouldFastRejectInput } from '../engine/shared/InputPrecheck';
 
 type CFGGroupId = 'basic' | 'structured' | 'expression' | 'ambiguous';
 type CFGSection = 'derivation' | 'parse-tree' | 'membership';
@@ -299,6 +300,22 @@ export default function CFGSimulator() {
       // Yield once so status updates before the synchronous derivation search starts.
       await new Promise((resolve) => window.setTimeout(resolve, 0));
 
+      const usePrecheck = Boolean(
+        activeExample
+          && definition.trim() === activeExample.definition.trim()
+          && startSymbol.trim() === activeExample.startSymbol.trim()
+      );
+
+      if (usePrecheck && shouldFastRejectInput('cfg', activeExample?.name, inputStr)) {
+        setSteps([]);
+        setTreeRoot(null);
+        setResult({ ok: false, msg: 'Rejected.', ambiguous: false });
+        setSimulated(true);
+        setCurStep(0);
+        setIsSimulating(false);
+        return [];
+      }
+
       const { grammar: parsed, errors: parseErrors } = parseGrammar(definition, startSymbol.trim());
       if (parseErrors.length > 0) {
         setErrors(parseErrors);
@@ -350,7 +367,7 @@ export default function CFGSimulator() {
 
       return chosenSteps;
     },
-    [definition, startSymbol, derivationType, inputStr, isFastMode, resetTimeline, startAuto]
+    [definition, startSymbol, derivationType, inputStr, isFastMode, resetTimeline, startAuto, activeExample]
   );
 
   const handleRun = useCallback(async () => {
