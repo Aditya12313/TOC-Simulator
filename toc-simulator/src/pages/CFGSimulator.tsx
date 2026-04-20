@@ -977,7 +977,7 @@ export default function CFGSimulator() {
         accent="cfg"
         status={executionStatus}
         runLabel={isFastMode ? 'Fast Run' : 'Run'}
-        stepIndicator={simulated ? `${curStep + 1} / ${steps.length + 1}` : '- / -'}
+        stepIndicator={simulated && steps.length > 0 ? `${curStep + 1} / ${steps.length + 1}` : '- / -'}
         speed={speed}
         speeds={SPEEDS}
         onRun={() => void handleRun()}
